@@ -54,6 +54,14 @@ enum Provider: String, CaseIterable, Identifiable {
     }
 }
 
+enum TranscriptionLanguage: String, CaseIterable, Identifiable {
+    case english, auto
+    var id: String { rawValue }
+    var title: String { self == .english ? "English (most accurate for any accent)" : "Auto-detect" }
+    /// Whisper's language code; "auto" detects it from the first 30 seconds of each 10-minute chunk.
+    var whisperCode: String { self == .english ? "en" : "auto" }
+}
+
 enum STTEngine: String, CaseIterable, Identifiable {
     case local, openai
     var id: String { rawValue }
@@ -80,6 +88,9 @@ enum Prefs {
     }
     static var provider: Provider { Provider(rawValue: defaults.string(forKey: "llmProvider") ?? "") ?? .anthropic }
     static var sttEngine: STTEngine { STTEngine(rawValue: defaults.string(forKey: "sttEngine") ?? "") ?? .local }
+    static var transcriptionLanguage: TranscriptionLanguage {
+        TranscriptionLanguage(rawValue: defaults.string(forKey: "transcriptionLanguage") ?? "") ?? .english
+    }
     static var whisperModel: String { defaults.string(forKey: "whisperModelPath") ?? defaultWhisperModel }
     // Key name kept from the Zoom-only version so existing settings carry over.
     static var autoDetectZoom: Bool { defaults.bool(forKey: "autoDetectZoom") }

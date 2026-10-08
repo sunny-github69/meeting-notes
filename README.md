@@ -30,9 +30,10 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
 
 - **Records locally:** the meeting's audio (the other participants) through ScreenCaptureKit, and your
   voice through the microphone, as separate tracks. Nothing leaves your Mac except the transcript sent to the AI provider you pick.
-- **Any English accent:** Whisper is trained on audio from speakers all over the world. Transcription
-  is fixed to English with a meeting-vocabulary hint, and the AI is told to fix obvious mishearings
-  from context.
+- **Any accent, or any language:** Whisper is trained on audio from speakers all over the world. By
+  default transcription is set to English with a meeting-vocabulary hint (most accurate for accented
+  English); switch *Language* to **Auto-detect** for meetings in other languages. The AI is told to fix
+  obvious mishearings from context and to write the notes in the meeting's language.
 - **Who said what:** meeting apps put a coloured border around the active speaker (Zoom green, Meet
   blue, Teams purple). About once a second the app finds that border inside the meeting window and
   reads the name label with on-device OCR (Apple Vision), so the transcript says `Priya Sharma:` instead
@@ -204,8 +205,11 @@ in Settings → Transcription:
 
 **Two settings make it better for this use:**
 
-- **Language is fixed to English.** Otherwise Whisper may mistake accented English for another
-  language and write the wrong script or translate.
+- **Language is English by default.** Otherwise Whisper may mistake accented English for another
+  language and write the wrong script or translate. For meetings in other languages, set
+  Settings → Transcription → Language to **Auto-detect**: Whisper then detects the language from the
+  first 30 seconds of each 10-minute part, and the English prompt hint is left out so it doesn't nudge
+  the output towards English.
 - **A prompt hint** ("a work meeting in English with speakers of different accents, discussing
   product, engineering and business topics") is passed as Whisper's initial prompt, which nudges its
   spelling and vocabulary.
@@ -299,7 +303,8 @@ Click the menu-bar icon, then the ⚙︎ button in the top-right corner of the p
   Turn AI notes off to save only the transcript.
 - **General**: *Launch at login*, *Auto-record when a Zoom, Meet or Teams call starts*, your name (used instead
   of "You" in the transcript), and *Identify who is speaking*.
-- **Transcription**: local whisper.cpp (shows "Model found" if step 2 worked) or the OpenAI API.
+- **Transcription**: local whisper.cpp (shows "Model found" if step 2 worked) or the OpenAI API, and the
+  language: *English* (default, best for any accent) or *Auto-detect* (meetings in other languages).
 
 The three main switches (auto-record, speakers, AI notes) are also in the menu-bar popover.
 

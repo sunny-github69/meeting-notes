@@ -335,6 +335,7 @@ struct AISettings: View {
 
 struct TranscriptionSettings: View {
     @AppStorage("sttEngine") private var sttRaw = STTEngine.local.rawValue
+    @AppStorage("transcriptionLanguage") private var languageRaw = TranscriptionLanguage.english.rawValue
     @AppStorage("whisperModelPath") private var whisperPath = Prefs.defaultWhisperModel
 
     var body: some View {
@@ -343,6 +344,14 @@ struct TranscriptionSettings: View {
                 Picker("Engine", selection: $sttRaw) {
                     ForEach(STTEngine.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                Picker("Language", selection: $languageRaw) {
+                    ForEach(TranscriptionLanguage.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+            } footer: {
+                Text(languageRaw == TranscriptionLanguage.english.rawValue
+                     ? "Best for English meetings: accented English is never mistaken for another language."
+                     : "For meetings in other languages. Detected per 10-minute part, so a meeting that switches language mid-way may be transcribed in the first one. Notes are written in the meeting's main language.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if sttRaw == STTEngine.local.rawValue {
                 Section {

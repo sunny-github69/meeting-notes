@@ -101,7 +101,8 @@ final class AppModel: ObservableObject {
         guard let session, let recording = session.recording else { return }
         do {
             state = .processing("Transcribing…")
-            let segments = try await Transcriber.transcribe(tracks: recording.tracks, engine: Prefs.sttEngine)
+            let segments = try await Transcriber.transcribe(tracks: recording.tracks, engine: Prefs.sttEngine,
+                                                              language: Prefs.transcriptionLanguage)
                 .map { name($0, using: recording.speakers) }
             guard !segments.isEmpty else { throw AppError("No speech was detected.") }
             let transcript = Transcriber.format(segments)

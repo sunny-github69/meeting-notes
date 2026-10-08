@@ -8,15 +8,17 @@ struct Segment {
 }
 
 enum Transcriber {
-    /// Biases Whisper towards meeting vocabulary; accent-neutral so it suits any speaker.
+    /// Biases Whisper towards meeting vocabulary; accent-neutral so it suits any speaker. Only used for
+    /// English: in auto-detect mode an English prompt would nudge Whisper into English.
     private static let hint = "A work meeting in English with speakers of different accents, discussing product, engineering and business topics."
     private typealias Raw = (start: Double, end: Double, text: String)
 
-    static func transcribe(tracks: [Track], engine: STTEngine) async throws -> [Segment] {
+    static func transcribe(tracks: [Track], engine: STTEngine, language: TranscriptionLanguage) async throws -> [Segment] {
         var segments: [Segment] = []
         for track in tracks {
             for chunk in track.chunks {
-                let raw = engine == .local ? try await local(chunk.url) : try await openAI(chunk.url)
+                let raw = engine == .local ? try await local(chunk.url, language: language)
+                                           : try await openAI(chunk.url, language: language)
                 segments += raw.map { Segment(start: chunk.offset + $0.start, end: chunk.offset + $0.end, speaker: track.speaker, text: $0.text) }
             }
         }
@@ -39,15 +41,17 @@ enum Transcriber {
         }.joined(separator: "\n\n")
     }
 
-    private static func openAI(_ wav: URL) async throws -> [Raw] {
+    private static func openAI(_ wav: URL, language: TranscriptionLanguage) async throws -> [Raw] {
         guard let key = Keychain.get(Provider.openai.rawValue) else {
             throw AppError("Add an OpenAI API key in Settings to use the Whisper API.")
         }
         let boundary = UUID().uuidString
         var body = Data()
         func append(_ s: String) { body.append(Data(s.utf8)) }
-        for (name, value) in [("model", "whisper-1"), ("response_format", "verbose_json"),
-                              ("language", "en"), ("prompt", hint)] {
+        // Leaving out "language" makes the API detect it.
+        let fields: [(String, String)] = [("model", "whisper-1"), ("response_format", "verbose_json")]
+            + (language == .english ? [("language", "en"), ("prompt", hint)] : [])
+        for (name, value) in fields {
             append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n")
         }
         append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
@@ -71,7 +75,7 @@ enum Transcriber {
         }
     }
 
-    private static func local(_ wav: URL) async throws -> [Raw] {
+    private static func local(_ wav: URL, language: TranscriptionLanguage) async throws -> [Raw] {
         // Apps launched from Finder don't get the shell's PATH, so look in Homebrew's prefixes directly.
         // Older whisper-cpp formulae named the binary "whisper-cpp" instead of "whisper-cli".
         let candidates = ["/opt/homebrew/bin", "/usr/local/bin"].flatMap { ["\($0)/whisper-cli", "\($0)/whisper-cpp"] }
@@ -84,8 +88,9 @@ enum Transcriber {
         let outBase = wav.deletingPathExtension().path
         let process = Process()
         process.executableURL = URL(fileURLWithPath: bin)
-        process.arguments = ["-m", Prefs.whisperModel, "-f", wav.path, "-l", "en", "--prompt", hint,
+        process.arguments = ["-m", Prefs.whisperModel, "-f", wav.path, "-l", language.whisperCode,
                              "-oj", "-of", outBase, "-np"]
+            + (language == .english ? ["--prompt", hint] : [])
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
