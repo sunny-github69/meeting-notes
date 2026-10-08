@@ -6,9 +6,9 @@ it into a short summary plus long, detailed notes, using your own Claude, OpenAI
 It does not join the call as a bot and adds nothing to the meeting, so Zoom does not notify other
 participants. Recording laws differ by country and company. See [Responsible use](#responsible-use).
 
-| Menu bar | Settings |
-|---|---|
-| <img src="docs/menu.png" width="360" alt="Menu-bar popover with Start recording and quick switches"> | <img src="docs/settings-general.png" width="400" alt="Settings window, General tab"> |
+| Menu bar | AI notes settings | Transcription settings |
+|---|---|---|
+| <img src="docs/menu.png" width="280" alt="Menu-bar popover with Start recording, quick switches and recent meetings"> | <img src="docs/settings-ai.png" width="300" alt="Settings, AI notes tab: provider, API key and model"> | <img src="docs/settings-transcription.png" width="300" alt="Settings, Transcription tab: local whisper.cpp with model found"> |
 
 **Contents:** [Features](#features) · [Example output](#example-output) · [How it works](#how-it-works) ·
 [Why two AI models](#why-two-different-ai-models) · [Whisper & the model file](#transcription-whisper-ggml-and-large-v3-turbo-q5_0) ·
