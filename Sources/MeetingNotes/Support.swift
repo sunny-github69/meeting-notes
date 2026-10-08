@@ -8,7 +8,7 @@ struct AppError: LocalizedError {
 }
 
 enum Provider: String, CaseIterable, Identifiable {
-    case anthropic, openai, gemini, mistral
+    case anthropic, openai, gemini, mistral, ollama
     var id: String { rawValue }
 
     var title: String {
@@ -17,15 +17,19 @@ enum Provider: String, CaseIterable, Identifiable {
         case .openai: return "ChatGPT (OpenAI)"
         case .gemini: return "Gemini (Google)"
         case .mistral: return "Mistral"
+        case .ollama: return "Ollama (local, free)"
         }
     }
+
+    /// Ollama runs on this Mac and needs no key.
+    var needsKey: Bool { self != .ollama }
 
     var keyHint: String {
         switch self {
         case .anthropic: return "Paste key (sk-ant-…)"
         case .openai: return "Paste key (sk-…)"
         case .gemini: return "Paste key (AIza…)"
-        case .mistral: return "Paste key"
+        case .mistral, .ollama: return "Paste key"
         }
     }
 
@@ -35,13 +39,14 @@ enum Provider: String, CaseIterable, Identifiable {
         case .openai: return URL(string: "https://platform.openai.com/api-keys")!
         case .gemini: return URL(string: "https://aistudio.google.com/app/apikey")!
         case .mistral: return URL(string: "https://console.mistral.ai/api-keys")!
+        case .ollama: return URL(string: "https://ollama.com/library")!
         }
     }
 
-    /// Base URL of the provider's OpenAI-compatible API; Anthropic uses its own Messages API instead.
+    /// Base URL of the provider's OpenAI-compatible API; Anthropic and Ollama use their own APIs instead.
     var openAICompatibleBase: String? {
         switch self {
-        case .anthropic: return nil
+        case .anthropic, .ollama: return nil
         case .openai: return "https://api.openai.com/v1"
         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
         case .mistral: return "https://api.mistral.ai/v1"

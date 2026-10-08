@@ -250,12 +250,14 @@ struct AISettings: View {
             } footer: {
                 Text("When off, only the transcript is saved.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("Provider") {
+            Section {
                 Picker("Provider", selection: $providerRaw) {
                     ForEach(Provider.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                SecureField("API key", text: $apiKey, prompt: Text(provider.keyHint))
-                    .textFieldStyle(.roundedBorder)
+                if provider.needsKey {
+                    SecureField("API key", text: $apiKey, prompt: Text(provider.keyHint))
+                        .textFieldStyle(.roundedBorder)
+                }
                 HStack {
                     Picker("Model", selection: $selectedModel) {
                         ForEach(model.models, id: \.self) { Text($0).tag($0) }
@@ -265,6 +267,13 @@ struct AISettings: View {
                         .help("Reload models")
                 }
                 keyStatus
+            } header: {
+                Text("Provider")
+            } footer: {
+                if !provider.needsKey {
+                    Text("Runs on this Mac: free, offline, nothing leaves your machine. Larger models write better notes but take longer.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .disabled(!enabled)
         }
@@ -283,12 +292,25 @@ struct AISettings: View {
 
     @ViewBuilder private var keyStatus: some View {
         if model.modelsLoading {
-            HStack { ProgressView().controlSize(.small); Text("Checking key…") }.font(.caption)
+            HStack {
+                ProgressView().controlSize(.small)
+                Text(provider.needsKey ? "Checking key…" : "Connecting to Ollama…")
+            }
+            .font(.caption)
         } else if let error = model.modelsError {
             Label(error, systemImage: "xmark.octagon.fill").font(.caption).foregroundStyle(.red)
         } else if !model.models.isEmpty {
-            Label("Key works · \(model.models.count) models available", systemImage: "checkmark.seal.fill")
+            Label(provider.needsKey ? "Key works · \(model.models.count) models available"
+                                    : "Ollama is running · \(model.models.count) local models",
+                  systemImage: "checkmark.seal.fill")
                 .font(.caption).foregroundStyle(.green)
+        } else if !provider.needsKey {
+            HStack {
+                Text("No models installed. In Terminal run: ollama pull llama3.1").textSelection(.enabled)
+                Link("Browse models", destination: provider.keyURL)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         } else {
             HStack {
                 Text("Paste your API key to load the latest models.")

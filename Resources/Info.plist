@@ -9,6 +9,10 @@
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key><true/>  <!-- plain http://localhost for Ollama -->
+    </dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Your own voice is recorded locally so it can be included in the meeting notes.</string>
 </dict>

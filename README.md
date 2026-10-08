@@ -1,7 +1,7 @@
 # MeetingNotes
 
 A free, open-source, lightweight macOS menu-bar app that records a Zoom meeting **locally** and turns
-it into a short summary plus long, detailed notes, using your own Claude, OpenAI, Gemini or Mistral API key.
+it into a short summary plus long, detailed notes, using your own Claude, OpenAI, Gemini or Mistral API key, or completely free and offline with Ollama.
 
 It does not join the call as a bot and adds nothing to the meeting, so Zoom does not notify other
 participants. Recording laws differ by country and company. See [Responsible use](#responsible-use).
@@ -26,7 +26,8 @@ participants. Recording laws differ by country and company. See [Responsible use
   Vision), so the transcript says `Priya Sharma:` instead of `Others:`. Frames are never saved.
 - **Audio-only fallback:** if Zoom is minimised or on another Space, recording carries on, those lines
   are labelled `Not recognised`, and speaker detection resumes on its own when the window is back.
-- **Bring your own AI:** Claude (Anthropic), ChatGPT (OpenAI), Gemini (Google) or Mistral. The model list is fetched live from the
+- **Bring your own AI, or run it locally:** Claude (Anthropic), ChatGPT (OpenAI), Gemini (Google), Mistral,
+  or **Ollama** for a fully local, free and offline pipeline (no API key). The model list is fetched live from the
   provider, so new models appear without an app update. Keys are kept in the macOS Keychain.
 - **Free transcription:** offline `whisper.cpp`, or the OpenAI Whisper API if you prefer.
 - **Hands-free:** optional auto-record when a Zoom meeting starts, launch at login, and a macOS
@@ -88,7 +89,7 @@ James asked whether Thursday is still realistic ...
                 │ 2. Who said it     mic lines = you, Zoom lines = name ◄────┘
                 │                    from the timeline, else "Not recognised"
                 │ 3. Save            transcript.md
-                │ 4. Text → notes    your AI provider (Claude/OpenAI/Gemini/Mistral)
+                │ 4. Text → notes    your AI (Claude/OpenAI/Gemini/Mistral, or local Ollama)
                 │ 5. Save            notes.md, delete the audio, notify you
                 └────────────────────────────────────────────────────┘
 ```
@@ -119,12 +120,12 @@ James asked whether Thursday is still realistic ...
 
 Turning a meeting into notes is two different jobs, and no single small model does both well:
 
-| | Speech-to-text (Whisper) | Notes (Claude / GPT / Gemini / Mistral) |
+| | Speech-to-text (Whisper) | Notes (Claude / GPT / Gemini / Mistral / Ollama) |
 |---|---|---|
 | Input | Audio | Text (the transcript) |
 | Output | What was said, word for word, with timestamps | What it *means*: summary, decisions, owners |
 | Understands the meeting? | No. It only hears sounds and writes words | Yes. It reads the whole meeting at once |
-| Runs | On your Mac, free (or OpenAI's API) | In the provider's cloud, with your API key |
+| Runs | On your Mac, free (or OpenAI's API) | In the provider's cloud with your API key, or on your Mac with Ollama |
 
 **Why your own API key?** Writing good notes needs a large language model: one that can read an
 hour of conversation, fix words Whisper misheard ("cube control" → "kubectl") from context, notice
@@ -135,6 +136,13 @@ from your Mac to the provider you chose, under your own account. That is why you
 the provider directly (a one-hour meeting is roughly 10–15k words, typically a few cents to a few tens
 of cents depending on the model), and can switch providers or models at any time. Keys are stored in
 the macOS Keychain. Turn *Write AI notes* off and nothing is sent anywhere; you just get the transcript.
+
+**Or keep everything local with Ollama.** [Ollama](https://ollama.com) runs open models (Llama, Qwen,
+Gemma, Mistral…) on your Mac's GPU. Pick *Ollama (local, free)* as the provider and no key is needed:
+the transcript never leaves your machine and there is no cost. Smaller local models write simpler notes
+than the big cloud ones and take longer on long meetings, so pick the biggest model your RAM allows.
+The app uses Ollama's own chat API and sets the context window (`num_ctx`) to fit the transcript,
+because Ollama's default window is only a few thousand tokens and it silently cuts longer input.
 
 ### Transcription: Whisper, GGML and `large-v3-turbo-q5_0`
 
@@ -200,8 +208,8 @@ mac-app/
         ├── Recorder.swift          ScreenCaptureKit (Zoom audio + frames), microphone, 16 kHz WAV chunk writer
         ├── SpeakerDetector.swift   Green-border detection, Vision OCR, Zoom-visible check, speaker timeline
         ├── Transcriber.swift       whisper.cpp / Whisper API calls, timestamps, transcript formatting
-        ├── LLM.swift               Notes prompt; Anthropic API and OpenAI-compatible API (OpenAI, Gemini,
-        │                           Mistral); live model lists
+        ├── LLM.swift               Notes prompt; Anthropic API, OpenAI-compatible API (OpenAI, Gemini,
+        │                           Mistral) and Ollama's local API; live model lists
         ├── Support.swift           Providers, preferences, Keychain, HTTP helper
         └── System.swift            Launch at login, macOS notifications
 ```
@@ -256,7 +264,8 @@ A waveform icon appears in the menu bar (top right). There is no Dock icon; that
 
 Click the menu-bar icon, then the ⚙︎ button in the top-right corner of the popover:
 
-- **AI notes**: pick a provider and paste its API key. The **Get a key** link opens the right page:
+- **AI notes**: pick a provider and paste its API key, or pick **Ollama (local, free)** (no key; Ollama
+  must be running and have a model, e.g. `ollama pull llama3.1`). The **Get a key** link opens the right page:
   [Anthropic](https://console.anthropic.com/settings/keys), [OpenAI](https://platform.openai.com/api-keys),
   [Google AI Studio](https://aistudio.google.com/app/apikey) or [Mistral](https://console.mistral.ai/api-keys).
   Each provider's key is saved separately, so you can switch between them. It is checked live ("Key works · N models")
@@ -318,6 +327,8 @@ allow it again. Settings and API keys are kept.
 | Every line is "Not recognised" | Use Zoom's Gallery view and keep the Zoom window visible. |
 | "Couldn't change login item" | Move the app to `/Applications` first. |
 | API error | Check the key and the account's credit in the provider's console. |
+| "Can't reach Ollama" | Open the Ollama app (or run `ollama serve`), then press ↻ next to Model. |
+| Ollama: "No models installed" | `ollama pull llama3.1` (or any chat model), then press ↻. |
 
 ### Uninstall
 
@@ -345,7 +356,8 @@ a meeting without telling people.
 ## Privacy
 
 - Audio and Zoom frames are processed on your Mac. Frames are never written to disk.
-- The transcript is sent only to the AI provider you choose (and, if you pick the OpenAI Whisper API,
+- With Ollama, nothing leaves your Mac at all.
+- Otherwise the transcript is sent only to the AI provider you choose (and, if you pick the OpenAI Whisper API,
   the audio is uploaded to OpenAI).
 - API keys are stored in the macOS Keychain, not in files or in this repository.
 
