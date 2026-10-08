@@ -254,7 +254,8 @@ struct AISettings: View {
                 Picker("Provider", selection: $providerRaw) {
                     ForEach(Provider.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                SecureField("API key", text: $apiKey)
+                SecureField("API key", text: $apiKey, prompt: Text("Paste key (\(provider.keyPrefix)…)"))
+                    .textFieldStyle(.roundedBorder)
                 HStack {
                     Picker("Model", selection: $selectedModel) {
                         ForEach(model.models, id: \.self) { Text($0).tag($0) }
@@ -289,7 +290,12 @@ struct AISettings: View {
             Label("Key works · \(model.models.count) models available", systemImage: "checkmark.seal.fill")
                 .font(.caption).foregroundStyle(.green)
         } else {
-            Text("Paste your API key to load the latest models.").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("Paste your API key to load the latest models.")
+                Link("Get a key", destination: provider.keyURL)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 

@@ -11,6 +11,11 @@ enum Provider: String, CaseIterable, Identifiable {
     case anthropic, openai
     var id: String { rawValue }
     var title: String { self == .anthropic ? "Claude (Anthropic)" : "ChatGPT (OpenAI)" }
+    var keyPrefix: String { self == .anthropic ? "sk-ant-" : "sk-" }
+    var keyURL: URL {
+        URL(string: self == .anthropic ? "https://console.anthropic.com/settings/keys"
+                                       : "https://platform.openai.com/api-keys")!
+    }
 }
 
 enum STTEngine: String, CaseIterable, Identifiable {
