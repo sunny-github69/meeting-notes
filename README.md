@@ -30,8 +30,9 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
 
 - **Records locally:** the meeting's audio (the other participants) through ScreenCaptureKit, and your
   voice through the microphone, as separate tracks. Nothing leaves your Mac except the transcript sent to the AI provider you pick.
-- **British and Indian English:** Whisper transcription is fixed to English with an accent and
-  vocabulary hint, and the AI is told to fix obvious mishearings from context.
+- **Any English accent:** Whisper is trained on audio from speakers all over the world. Transcription
+  is fixed to English with a meeting-vocabulary hint, and the AI is told to fix obvious mishearings
+  from context.
 - **Who said what:** meeting apps put a coloured border around the active speaker (Zoom green, Meet
   blue, Teams purple). About once a second the app finds that border inside the meeting window and
   reads the name label with on-device OCR (Apple Vision), so the transcript says `Priya Sharma:` instead
@@ -168,8 +169,8 @@ because Ollama's default window is only a few thousand tokens and it silently cu
 ### Transcription: Whisper, GGML and `large-v3-turbo-q5_0`
 
 **Whisper** is OpenAI's open-source speech-recognition model. It is a transformer trained on a very
-large amount of real-world audio in many accents, which is why it copes well with British and Indian
-English. It works on 30-second windows: the audio is turned into a spectrogram (a picture of which
+large amount of real-world audio from speakers all over the world, which is why it copes well with
+many different accents. It works on 30-second windows: the audio is turned into a spectrogram (a picture of which
 frequencies are loud at each moment), an *encoder* turns that into a representation of the sounds,
 and a *decoder* writes the text one token at a time, with timestamps.
 
@@ -203,10 +204,11 @@ in Settings → Transcription:
 
 **Two settings make it better for this use:**
 
-- **Language is fixed to English.** Otherwise Whisper may detect Indian English as Hindi and write
-  the wrong script or translate.
-- **A prompt hint** ("a work meeting in British and Indian English, with product, engineering and
-  business terms") is passed as Whisper's initial prompt, which nudges its spelling and vocabulary.
+- **Language is fixed to English.** Otherwise Whisper may mistake accented English for another
+  language and write the wrong script or translate.
+- **A prompt hint** ("a work meeting in English with speakers of different accents, discussing
+  product, engineering and business topics") is passed as Whisper's initial prompt, which nudges its
+  spelling and vocabulary.
 
 The **OpenAI Whisper API** option runs the same kind of model on OpenAI's servers instead: nothing
 to install, but the audio is uploaded and billed per minute, and it needs an OpenAI key.

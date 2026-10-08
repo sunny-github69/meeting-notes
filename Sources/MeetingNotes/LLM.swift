@@ -5,7 +5,7 @@ enum LLM {
     You turn the automatic transcript of an online meeting (Zoom, Google Meet or Microsoft Teams) into \
     meeting notes.
 
-    The transcript comes from speech recognition of British and Indian English speakers, so it contains \
+    The transcript comes from speech recognition of English speakers with a range of accents, so it contains \
     mishearings, missing punctuation and mangled names or technical terms. Fix them using context, but never \
     invent facts. Speaker names come from the meeting app's active-speaker highlight: usually right, \
     occasionally off by a line. "Not recognised" means the speaker could not be identified. "Names seen on \

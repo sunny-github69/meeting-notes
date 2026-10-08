@@ -8,8 +8,8 @@ struct Segment {
 }
 
 enum Transcriber {
-    /// Biases Whisper towards British / Indian English vocabulary and spelling.
-    private static let hint = "A work meeting in British and Indian English, with product, engineering and business terms."
+    /// Biases Whisper towards meeting vocabulary; accent-neutral so it suits any speaker.
+    private static let hint = "A work meeting in English with speakers of different accents, discussing product, engineering and business topics."
     private typealias Raw = (start: Double, end: Double, text: String)
 
     static func transcribe(tracks: [Track], engine: STTEngine) async throws -> [Segment] {
