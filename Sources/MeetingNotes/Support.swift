@@ -81,6 +81,7 @@ enum Prefs {
     static var provider: Provider { Provider(rawValue: defaults.string(forKey: "llmProvider") ?? "") ?? .anthropic }
     static var sttEngine: STTEngine { STTEngine(rawValue: defaults.string(forKey: "sttEngine") ?? "") ?? .local }
     static var whisperModel: String { defaults.string(forKey: "whisperModelPath") ?? defaultWhisperModel }
+    // Key name kept from the Zoom-only version so existing settings carry over.
     static var autoDetectZoom: Bool { defaults.bool(forKey: "autoDetectZoom") }
     static func model(for provider: Provider) -> String { defaults.string(forKey: "model.\(provider.rawValue)") ?? "" }
 }

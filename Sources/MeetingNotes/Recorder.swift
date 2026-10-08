@@ -105,27 +105,29 @@ private extension CMSampleBuffer {
 }
 
 struct Recording {
+    let app: MeetingApp?
     let tracks: [Track]
     let speakers: [SpeakerDetector.Sample]
+    let participants: [String]  // names seen on screen
 }
 
-/// Captures Zoom's audio (the other participants) through ScreenCaptureKit and your microphone
-/// through AVAudioEngine. Everything stays on this Mac; Zoom is never told.
+/// Captures the meeting's audio (the other participants) through ScreenCaptureKit and your microphone
+/// through AVAudioEngine. Everything stays on this Mac; no bot joins the call.
 final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
-    static let zoomBundleID = "us.zoom.xos"
-
     private var stream: SCStream?
     private let engine = AVAudioEngine()
     private var others: ChunkedWavWriter?
     private var mine: ChunkedWavWriter?
     private var detector: SpeakerDetector?
+    private var app: MeetingApp?
 
-    func start(into dir: URL, detectSpeakers: Bool,
+    func start(into dir: URL, app: MeetingApp?, detectSpeakers: Bool,
                onSpeaker: @escaping @MainActor (SpeakerDetector.Status) -> Void) async throws {
         guard await AVCaptureDevice.requestAccess(for: .audio) else {
             throw AppError("Microphone access denied. Enable it in System Settings → Privacy & Security.")
         }
         let started = Date()
+        self.app = app
         others = ChunkedWavWriter(dir: dir, name: "others", sessionStart: started)
         mine = ChunkedWavWriter(dir: dir, name: "you", sessionStart: started)
         try await startCapture(sessionStart: started, detectSpeakers: detectSpeakers, onSpeaker: onSpeaker)
@@ -137,10 +139,13 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         engine.stop()
         try? await stream?.stopCapture()
         stream = nil
+        let detected = detector?.finish()
         return Recording(
+            app: app,
             tracks: [Track(speaker: Track.others, chunks: others?.finish() ?? []),
                      Track(speaker: Track.you, chunks: mine?.finish() ?? [])],
-            speakers: detector?.finish() ?? [])
+            speakers: detected?.samples ?? [],
+            participants: detected?.participants ?? [])
     }
 
     private func startCapture(sessionStart: Date, detectSpeakers: Bool,
@@ -155,30 +160,31 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)  // 1 fps is plenty for speaker detection
         config.showsCursor = false
 
-        // Only Zoom's audio and windows when it is running; otherwise all system audio and no speaker detection.
-        let filter: SCContentFilter
-        detector = nil
-        if let zoom = content.applications.first(where: { $0.bundleIdentifier == Self.zoomBundleID }) {
-            filter = SCContentFilter(display: display, including: [zoom], exceptingWindows: [])
-            if detectSpeakers {
-                detector = SpeakerDetector(sessionStart: sessionStart, zoomPID: zoom.processID, onChange: onSpeaker)
-            }
-        } else {
-            filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+        // Zoom: only its own audio and windows. Meet/Teams play audio from helper processes, and with no
+        // known app there is nothing to filter on, so those record all system audio (except this app).
+        let ownApps = content.applications.filter { running in
+            app?.bundleIDs.contains(running.bundleIdentifier) == true
         }
-        if detector != nil {
+        let filter = app?.capturesOwnAudioOnly == true && !ownApps.isEmpty
+            ? SCContentFilter(display: display, including: ownApps, exceptingWindows: [])
+            : SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+
+        detector = nil
+        if let app, detectSpeakers {
             // Retina-sharp name labels for OCR, capped so the per-frame pixel scan stays cheap.
             let scale = min(2, 2560 / Double(display.width))
             config.width = Int(Double(display.width) * scale)
             config.height = Int(Double(display.height) * scale)
             config.pixelFormat = kCVPixelFormatType_32BGRA
+            detector = SpeakerDetector(app: app, sessionStart: sessionStart, displayFrame: display.frame,
+                                       frameWidth: config.width, onChange: onSpeaker)
         } else {
             config.width = 2  // audio only; keep the unavoidable video stream tiny
             config.height = 2
         }
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "zoom-frames"))
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "meeting-frames"))
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "system-audio"))
         try await stream.startCapture()
         self.stream = stream

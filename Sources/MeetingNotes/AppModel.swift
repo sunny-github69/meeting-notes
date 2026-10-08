@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var speakerStatus: SpeakerDetector.Status?
+    @Published private(set) var meetingApp: MeetingApp?
     @Published private(set) var recent: [Meeting] = []
     @Published private(set) var models: [String] = []
     @Published private(set) var modelsLoading = false
@@ -51,7 +52,7 @@ final class AppModel: ObservableObject {
         Notifier.shared.setUp()
         refreshRecent()
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.pollZoom() }
+            Task { @MainActor in await self?.pollMeetings() }
         }
     }
 
@@ -61,19 +62,24 @@ final class AppModel: ObservableObject {
 
     // MARK: Recording
 
-    func start(auto: Bool = false) async {
+    /// Starts recording. `app` is the meeting app auto-record detected; a manual start works it out here.
+    func start(auto: Bool = false, app: MeetingApp? = nil) async {
         guard !isBusy else { return }
         let dir = Self.notesRoot.appendingPathComponent(Self.folderFormat.string(from: Date()))
         do {
+            let app = await Self.detected(app) { MeetingDetector.currentApp() }
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try await recorder.start(into: dir, detectSpeakers: Prefs.detectSpeakers) { [weak self] status in
+            try await recorder.start(into: dir, app: app, detectSpeakers: Prefs.detectSpeakers) { [weak self] status in
                 self?.speakerStatus = status
             }
             session = (dir, nil)
+            meetingApp = app
             autoStarted = auto
             missedPolls = 0
             state = .recording(Date())
-            if auto { Notifier.shared.post("Recording Zoom meeting", "Notes will be written when the meeting ends.") }
+            if auto {
+                Notifier.shared.post("Recording \(app?.title ?? "meeting")", "Notes will be written when the meeting ends.")
+            }
         } catch {
             ignoreCurrentMeeting = true
             state = .failed(error.localizedDescription)
@@ -85,6 +91,7 @@ final class AppModel: ObservableObject {
         ignoreCurrentMeeting = true
         session = (dir, await recorder.stop())
         speakerStatus = nil
+        meetingApp = nil
         await process()
     }
 
@@ -109,7 +116,8 @@ final class AppModel: ObservableObject {
                 let speakers = segments.map(\.speaker).filter { seen.insert($0).inserted }
                 let notes = try await LLM.complete(
                     provider: provider, model: model,
-                    user: LLM.userMessage(transcript: transcript, recordedBy: Prefs.yourName, speakers: speakers))
+                    user: LLM.userMessage(transcript: transcript, app: recording.app, recordedBy: Prefs.yourName,
+                                          speakers: speakers, namesOnScreen: recording.participants))
                 result = session.dir.appendingPathComponent("notes.md")
                 try notes.write(to: result, atomically: true, encoding: .utf8)
             }
@@ -126,8 +134,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Replaces the track label with your name, or with whoever Zoom showed as the active speaker.
-    /// Lines spoken while Zoom was hidden (or with no highlight) have no sample and stay unrecognised.
+    /// Replaces the track label with your name, or with whoever the meeting app highlighted.
+    /// Lines spoken while the meeting window was hidden (or with no highlight) have no sample and stay unrecognised.
     private func name(_ segment: Segment, using speakers: [SpeakerDetector.Sample]) -> Segment {
         var segment = segment
         segment.speaker = segment.speaker == Track.you
@@ -136,31 +144,29 @@ final class AppModel: ObservableObject {
         return segment
     }
 
-    // MARK: Zoom auto-detection
+    // MARK: Meeting auto-detection
 
-    /// Zoom spawns a "CptHost" helper process for as long as a meeting is running.
-    private func pollZoom() async {
+    /// Starts when Zoom, Meet or Teams enters a call and stops once the call has ended for two polls.
+    private func pollMeetings() async {
         guard Prefs.autoDetectZoom else { return }
-        let inMeeting = await Task.detached { () -> Bool in
-            let pgrep = Process()
-            pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-            pgrep.arguments = ["-x", "CptHost"]
-            pgrep.standardOutput = FileHandle.nullDevice
-            do {
-                try pgrep.run()
-                pgrep.waitUntilExit()
-                return pgrep.terminationStatus == 0
-            } catch { return false }
-        }.value
+        let recordingApp = isRecording ? meetingApp : nil
+        let newCall = await Self.detected(nil) { recordingApp == nil ? MeetingDetector.newCall() : nil }
+        let inCall = await Self.detected(nil) { recordingApp.map(MeetingDetector.isInCall) } ?? (newCall != nil)
 
-        if !inMeeting { ignoreCurrentMeeting = false }
+        if !inCall { ignoreCurrentMeeting = false }
         if isRecording {
             guard autoStarted else { return }
-            missedPolls = inMeeting ? 0 : missedPolls + 1
+            missedPolls = inCall ? 0 : missedPolls + 1
             if missedPolls >= 2 { await stop() }
-        } else if inMeeting && !ignoreCurrentMeeting {
-            await start(auto: true)
+        } else if let newCall, !ignoreCurrentMeeting {
+            await start(auto: true, app: newCall)
         }
+    }
+
+    /// Returns `known` if set, else runs the (process-launching, CoreAudio) detection off the main thread.
+    private static func detected<T>(_ known: T?, _ detect: @escaping @Sendable () -> T?) async -> T? {
+        if let known { return known }
+        return await Task.detached(operation: detect).value
     }
 
     // MARK: Menu & settings helpers

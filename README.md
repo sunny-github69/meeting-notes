@@ -1,10 +1,21 @@
 # MeetingNotes
 
-A free, open-source, lightweight macOS menu-bar app that records a Zoom meeting **locally** and turns
-it into a short summary plus long, detailed notes, using your own Claude, OpenAI, Gemini or Mistral API key, or completely free and offline with Ollama.
+A free, open-source, lightweight macOS menu-bar app that records online meetings **locally** (Zoom,
+Google Meet and Microsoft Teams) and turns them into a short summary plus long, detailed notes, using
+your own Claude, OpenAI, Gemini or Mistral API key, or completely free and offline with Ollama.
 
-It does not join the call as a bot and adds nothing to the meeting, so Zoom does not notify other
-participants. Recording laws differ by country and company. See [Responsible use](#responsible-use).
+No bot joins the call and the audio stays on your Mac. Recording laws differ by country and company;
+see [Responsible use](#responsible-use).
+
+| App | Recording | Auto-record | Speaker names |
+|---|---|---|---|
+| Zoom (desktop app) | Zoom's audio only | ✅ | ✅ green border (Gallery view) |
+| Google Meet (Chrome, Edge, Arc, Brave, Safari, Firefox) | All system audio | ✅ macOS 14.4+ | 🧪 blue border (grid view) |
+| Microsoft Teams (desktop app) | All system audio | ✅ macOS 14.4+ | 🧪 purple border (gallery view) |
+
+🧪 = experimental: the Meet and Teams highlight colours are tuned from their UI but not yet tested
+widely. If they miss, lines fall back to `Not recognised`, and the notes still get the participant names
+read from the screen. The colours live in `MeetingApp.isHighlight` and are easy to adjust.
 
 | Menu bar | AI notes settings | Transcription settings |
 |---|---|---|
@@ -17,21 +28,25 @@ participants. Recording laws differ by country and company. See [Responsible use
 
 ## Features
 
-- **Records locally:** Zoom's audio (the other participants) through ScreenCaptureKit, and your voice
-  through the microphone. Nothing leaves your Mac except the transcript sent to the AI provider you pick.
+- **Records locally:** the meeting's audio (the other participants) through ScreenCaptureKit, and your
+  voice through the microphone, as separate tracks. Nothing leaves your Mac except the transcript sent to the AI provider you pick.
 - **British and Indian English:** Whisper transcription is fixed to English with an accent and
   vocabulary hint, and the AI is told to fix obvious mishearings from context.
-- **Who said what:** in Zoom's Gallery view the active speaker gets a green border. About once a second
-  the app finds that border in the Zoom window and reads the name label with on-device OCR (Apple
-  Vision), so the transcript says `Priya Sharma:` instead of `Others:`. Frames are never saved.
-- **Audio-only fallback:** if Zoom is minimised or on another Space, recording carries on, those lines
-  are labelled `Not recognised`, and speaker detection resumes on its own when the window is back.
+- **Who said what:** meeting apps put a coloured border around the active speaker (Zoom green, Meet
+  blue, Teams purple). About once a second the app finds that border inside the meeting window and
+  reads the name label with on-device OCR (Apple Vision), so the transcript says `Priya Sharma:` instead
+  of `Others:`. Frames are never saved.
+- **Participant list:** every ~15 s all name labels in the meeting window are read too, and passed to
+  the notes AI so names are spelled right even for people who never got highlighted.
+- **Audio-only fallback:** if the meeting window is minimised, on another Space, or (Meet) its tab is in
+  the background, recording carries on, those lines are labelled `Not recognised`, and speaker
+  detection resumes on its own when the window is back.
 - **Bring your own AI, or run it locally:** Claude (Anthropic), ChatGPT (OpenAI), Gemini (Google), Mistral,
   or **Ollama** for a fully local, free and offline pipeline (no API key). The model list is fetched live from the
   provider, so new models appear without an app update. Keys are kept in the macOS Keychain.
 - **Free transcription:** offline `whisper.cpp`, or the OpenAI Whisper API if you prefer.
-- **Hands-free:** optional auto-record when a Zoom meeting starts, launch at login, and a macOS
-  notification when the notes are ready.
+- **Hands-free:** optional auto-record when a Zoom, Meet or Teams call starts (and stop when it ends),
+  launch at login, and a macOS notification when the notes are ready.
 
 ## Example output
 
@@ -80,13 +95,13 @@ James asked whether Thursday is still realistic ...
 
 ```text
                 ┌──────────────── during the meeting ────────────────┐
- Zoom audio ────┤ ScreenCaptureKit ─► 16 kHz mono WAV, 10-min chunks │──┐
+ Meeting audio ─┤ ScreenCaptureKit ─► 16 kHz mono WAV, 10-min chunks │──┐
  Your mic ──────┤ AVAudioEngine    ─► 16 kHz mono WAV, 10-min chunks │──┤
- Zoom window ───┤ 1 frame/sec ─► green border ─► OCR name ─► timeline│──┼──┐
+ Meeting window ┤ 1 frame/sec ─► highlight ─► OCR name ─► timeline  │──┼──┐
                 └────────────────────────────────────────────────────┘  │  │
                 ┌──────────────── after you press Stop ──────────────┐  │  │
                 │ 1. Speech → text   whisper.cpp (local) or Whisper API ◄─┘  │
-                │ 2. Who said it     mic lines = you, Zoom lines = name ◄────┘
+                │ 2. Who said it     mic = you, meeting audio = name ◄───────┘
                 │                    from the timeline, else "Not recognised"
                 │ 3. Save            transcript.md
                 │ 4. Text → notes    your AI (Claude/OpenAI/Gemini/Mistral, or local Ollama)
@@ -94,24 +109,30 @@ James asked whether Thursday is still realistic ...
                 └────────────────────────────────────────────────────┘
 ```
 
-1. **Start.** You press *Start recording*, or *Auto-record* sees Zoom's `CptHost` helper process
-   (it only exists while you are in a meeting) and starts for you. It stops when the process goes away.
-2. **Capture.** Two separate audio tracks are recorded: Zoom's own audio (everyone else) through
-   ScreenCaptureKit, filtered to the Zoom app only, and your microphone. Keeping them separate means
+1. **Detect the meeting (no AI needed).** The app is identified by its bundle id (Zoom, Teams) or, for
+   Google Meet, by a browser window titled "Meet – …". A call is "on" when that app is using the
+   microphone (macOS 14.4+ reports this per app) or, for Zoom, while its `CptHost` meeting helper runs.
+   *Auto-record* starts then and stops a few seconds after the call ends. You can also press
+   *Start recording* yourself.
+2. **Capture.** Two separate audio tracks are recorded: the meeting's audio (everyone else) through
+   ScreenCaptureKit, and your microphone. For Zoom only Zoom's own audio is taken; Meet and Teams play
+   sound from helper processes, so for them all system audio is recorded (mute music and videos). Keeping them separate means
    every line from the mic is you, with no guessing. Both are converted on the fly to 16 kHz mono,
    the format Whisper expects, and written in 10-minute WAV chunks so a long meeting never builds one
    huge file (and each chunk stays under the Whisper API's 25 MB upload limit).
-3. **Speaker detection** runs in parallel: about once a second the Zoom window is checked for the
-   green active-speaker border and the name in that tile is read with Apple's on-device OCR. This
+3. **Speaker detection** runs in parallel: about once a second the meeting window is checked for the
+   app's active-speaker border colour, and the name in that tile is read with Apple's on-device OCR.
+   Every ~15 s all name labels in the window are read as well, giving a participant list. This
    produces a timeline like `00:31 Priya Sharma, 00:32 Priya Sharma, 00:40 James Carter`. Frames are
    analysed in memory and thrown away.
 4. **Transcribe.** After you stop, each chunk goes through Whisper, which returns text with start
    and end times. Chunk offsets turn those into meeting times.
-5. **Name the lines.** Mic lines get your name. For each Zoom line the app looks up who the timeline
-   says was highlighted during those seconds; if nobody was (Zoom minimised, Speaker view), the line
-   is `Not recognised`. Lines are sorted by time and consecutive lines by the same person merged.
-6. **Write notes.** The transcript, the speaker list and a fixed instruction prompt go to the AI
-   provider you picked. It returns the Summary, Decisions, Action items, Open questions and Detailed
+5. **Name the lines.** Mic lines get your name. For each meeting-audio line the app looks up who the
+   timeline says was highlighted during those seconds; if nobody was (window hidden, speaker view), the
+   line is `Not recognised`. Lines are sorted by time and consecutive lines by the same person merged.
+6. **Write notes.** The transcript, the speaker list, the names seen on screen and a fixed instruction
+   prompt go to the AI provider you picked. Where the conversation makes it obvious ("Thanks, Priya"),
+   the AI may mark a `Not recognised` speaker as "likely Priya", but it is told not to guess otherwise. It returns the Summary, Decisions, Action items, Open questions and Detailed
    notes as Markdown.
 7. **Clean up.** `transcript.md` and `notes.md` are saved, the WAV files are deleted, and you get a
    notification. If any step fails the audio is kept so **Retry** can run steps 4–7 again.
@@ -203,10 +224,13 @@ mac-app/
     ├── docs/                    Screenshots used in this README
     └── Sources/MeetingNotes/
         ├── MeetingNotesApp.swift   UI: menu-bar popover and the Settings window (General, AI notes, Transcription)
-        ├── AppModel.swift          State (idle → recording → processing → done/failed), Zoom auto-detect,
+        ├── MeetingApp.swift        Zoom / Meet / Teams: bundle ids, highlight colours, call detection
+        │                           (mic usage per app, window titles)
+        ├── AppModel.swift          State (idle → recording → processing → done/failed), auto-record,
         │                           runs the pipeline, recent meetings
-        ├── Recorder.swift          ScreenCaptureKit (Zoom audio + frames), microphone, 16 kHz WAV chunk writer
-        ├── SpeakerDetector.swift   Green-border detection, Vision OCR, Zoom-visible check, speaker timeline
+        ├── Recorder.swift          ScreenCaptureKit (meeting audio + frames), microphone, 16 kHz WAV chunk writer
+        ├── SpeakerDetector.swift   Highlight detection, Vision OCR, window-visible check, speaker timeline,
+        │                           participant names
         ├── Transcriber.swift       whisper.cpp / Whisper API calls, timestamps, transcript formatting
         ├── LLM.swift               Notes prompt; Anthropic API, OpenAI-compatible API (OpenAI, Gemini,
         │                           Mistral) and Ollama's local API; live model lists
@@ -271,7 +295,7 @@ Click the menu-bar icon, then the ⚙︎ button in the top-right corner of the p
   Each provider's key is saved separately, so you can switch between them. It is checked live ("Key works · N models")
   and the model list loads; pick a model. Keys are stored in the macOS Keychain, never in files.
   Turn AI notes off to save only the transcript.
-- **General**: *Launch at login*, *Auto-record when a Zoom meeting starts*, your name (used instead
+- **General**: *Launch at login*, *Auto-record when a Zoom, Meet or Teams call starts*, your name (used instead
   of "You" in the transcript), and *Identify who is speaking*.
 - **Transcription**: local whisper.cpp (shows "Model found" if step 2 worked) or the OpenAI API.
 
@@ -279,14 +303,16 @@ The three main switches (auto-record, speakers, AI notes) are also in the menu-b
 
 ### 5. Grant permissions and do a test recording
 
-1. Start a Zoom meeting (alone is fine) and switch to **Gallery view**. Use headphones.
+1. Start a Zoom, Google Meet or Teams meeting (alone is fine) and switch to the **grid / gallery view**.
+   Use headphones.
 2. Press **Start recording**. macOS asks for:
 
    - **Microphone** → Allow.
    - **Screen & System Audio Recording** → open System Settings → Privacy & Security → enable
      *MeetingNotes*. macOS may ask you to quit and reopen the app; do so and start again.
 3. While recording, the popover shows a timer and who is speaking, e.g. "Priya Sharma is speaking".
-   Minimise Zoom and it switches to "Zoom not visible – notes from audio only".
+   Minimise the meeting window (or switch away from the Meet tab) and it shows
+   "Google Meet not visible – notes from audio only".
 4. Press **Stop & write notes**. When the notification arrives, click it (or **Open**) to read the notes.
 
 To test speaker names, join the same meeting from a phone and talk from there.
@@ -294,7 +320,7 @@ To test speaker names, join the same meeting from a phone and talk from there.
 ### Daily use
 
 - **Manual:** menu-bar icon → **Start recording** → **Stop & write notes**.
-- **Automatic:** turn on **Auto-record Zoom meetings**. Recording starts when you join a meeting and
+- **Automatic:** turn on **Auto-record meetings**. Recording starts when you join a meeting and
   the notes are written when you leave. Pressing Stop mid-meeting stops it for that meeting.
 - Past meetings are listed under **Recent** in the popover; **Open notes folder** shows all of them.
 
@@ -324,7 +350,8 @@ allow it again. Settings and API keys are kept.
 | `brew` says "You are using macOS on Intel x86_64" on an Apple Silicon Mac | You have an old Intel Homebrew in `/usr/local` (often migrated from an older Mac). Install the native one in `/opt/homebrew` (step 1), run `echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`, open a new terminal, check `which brew` shows `/opt/homebrew/bin/brew`, then install whisper-cpp again. |
 | "Whisper model not found" | Redo step 2, or fix the path in Settings → Transcription. |
 | Notes have no "Others" lines | Screen & System Audio Recording permission is missing; grant it and reopen the app. |
-| Every line is "Not recognised" | Use Zoom's Gallery view and keep the Zoom window visible. |
+| Every line is "Not recognised" | Use the grid/gallery view and keep the meeting window visible (Meet: keep its tab in front). For Meet/Teams the highlight colour may need tuning in `MeetingApp.isHighlight`. |
+| Auto-record doesn't start for Meet/Teams | Needs macOS 14.4+. For Meet, the tab title must start with "Meet". Otherwise press Start manually. |
 | "Couldn't change login item" | Move the app to `/Applications` first. |
 | API error | Check the key and the account's credit in the provider's console. |
 | "Can't reach Ollama" | Open the Ollama app (or run `ollama serve`), then press ↻ next to Model. |
@@ -339,13 +366,15 @@ defaults delete com.local.meetingnotes
 Meeting notes in `~/Documents/MeetingNotes` are left alone.
 
 ## Limitations
-- Speaker names need Gallery view and the Zoom window visible (not minimised). Speaker view has no
-  green border, so those lines fall back to `Not recognised`.
-- Start Zoom before recording: then only Zoom's audio is captured. Otherwise it falls back to all system audio
+- Speaker names need the grid/gallery view and the meeting window visible (not minimised; for Meet,
+  the tab in front). Speaker-only views have no highlight border, so those lines become `Not recognised`.
+- Meet and Teams speaker detection is experimental (highlight colours not widely tested).
+- Meet and Teams record all system audio, so mute other audio during the call.
+- Join the meeting before pressing Start; with no meeting app detected, all system audio is recorded
   and speaker names are off.
-- Use headphones, otherwise Zoom audio leaks into your mic and gets transcribed twice.
-- Speaker names come from OCR of Zoom's UI and can lag by a line, or misread an unusual name.
-- Zoom must be on the main display.
+- Use headphones, otherwise meeting audio leaks into your mic and gets transcribed twice.
+- Speaker names come from OCR of the meeting UI and can lag by a line, or misread an unusual name.
+- The meeting window must be on the main display.
 
 ## Responsible use
 
@@ -355,7 +384,7 @@ a meeting without telling people.
 
 ## Privacy
 
-- Audio and Zoom frames are processed on your Mac. Frames are never written to disk.
+- Audio and meeting-window frames are processed on your Mac. Frames are never written to disk.
 - With Ollama, nothing leaves your Mac at all.
 - Otherwise the transcript is sent only to the AI provider you choose (and, if you pick the OpenAI Whisper API,
   the audio is uploaded to OpenAI).

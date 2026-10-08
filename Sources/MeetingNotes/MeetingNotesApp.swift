@@ -33,7 +33,7 @@ struct MenuView: View {
             header
             statusCard
             VStack(spacing: 8) {
-                SwitchRow(title: "Auto-record Zoom meetings", icon: "video", isOn: $autoDetectZoom)
+                SwitchRow(title: "Auto-record meetings", icon: "video", isOn: $autoDetectZoom)
                 SwitchRow(title: "Identify speakers", icon: "person.2.wave.2", isOn: $detectSpeakers)
                 SwitchRow(title: "Write AI notes", icon: "sparkles", isOn: $aiNotesEnabled)
             }
@@ -79,8 +79,8 @@ struct MenuView: View {
 
     private var subtitle: String {
         switch model.state {
-        case .idle: return autoDetectZoom ? "Waiting for a Zoom meeting" : "Ready"
-        case .recording: return "Recording locally"
+        case .idle: return autoDetectZoom ? "Waiting for Zoom, Meet or Teams" : "Ready"
+        case .recording: return model.meetingApp.map { "Recording \($0.title) locally" } ?? "Recording locally"
         case .processing: return "Working…"
         case .done: return "Notes ready"
         case .failed: return "Something went wrong"
@@ -129,10 +129,11 @@ struct MenuView: View {
         case .speaking(let name):
             Label("\(name) is speaking", systemImage: "person.wave.2").foregroundStyle(.secondary)
         case .noHighlight:
-            Label("Looking for the active speaker (use Gallery view)", systemImage: "person.crop.rectangle")
+            Label("Looking for the active speaker (use grid/gallery view)", systemImage: "person.crop.rectangle")
                 .foregroundStyle(.secondary)
-        case .zoomHidden:
-            Label("Zoom not visible – notes from audio only", systemImage: "eye.slash").foregroundStyle(.orange)
+        case .appHidden:
+            Label("\(model.meetingApp?.title ?? "Meeting") not visible – notes from audio only", systemImage: "eye.slash")
+                .foregroundStyle(.orange)
         case nil:
             Label("Listening…", systemImage: "waveform").foregroundStyle(.secondary)
         }
@@ -207,16 +208,16 @@ struct GeneralSettings: View {
             Section {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                 if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
-                Toggle("Auto-record when a Zoom meeting starts", isOn: $autoDetectZoom)
+                Toggle("Auto-record when a Zoom, Meet or Teams call starts", isOn: $autoDetectZoom)
             } footer: {
                 Text("Recording starts when you join a meeting and notes are written when it ends.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 TextField("Your name", text: $yourName)
-                Toggle("Identify who is speaking from the Zoom window", isOn: $detectSpeakers)
+                Toggle("Identify who is speaking from the meeting window", isOn: $detectSpeakers)
             } footer: {
-                Text("Use Zoom's Gallery view and keep the Zoom window on screen. Frames are analysed in memory about once a second and never saved. If Zoom is minimised, notes come from audio alone (\"Not recognised\") and detection resumes when it is back.")
+                Text("Use a grid/gallery layout and keep the meeting window (for Meet: its browser tab) on screen. Frames are analysed in memory about once a second and never saved. If the window is hidden, notes come from audio alone (\"Not recognised\") and detection resumes when it is back.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
