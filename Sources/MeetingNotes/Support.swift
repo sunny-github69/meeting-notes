@@ -8,13 +8,44 @@ struct AppError: LocalizedError {
 }
 
 enum Provider: String, CaseIterable, Identifiable {
-    case anthropic, openai
+    case anthropic, openai, gemini, mistral
     var id: String { rawValue }
-    var title: String { self == .anthropic ? "Claude (Anthropic)" : "ChatGPT (OpenAI)" }
-    var keyPrefix: String { self == .anthropic ? "sk-ant-" : "sk-" }
+
+    var title: String {
+        switch self {
+        case .anthropic: return "Claude (Anthropic)"
+        case .openai: return "ChatGPT (OpenAI)"
+        case .gemini: return "Gemini (Google)"
+        case .mistral: return "Mistral"
+        }
+    }
+
+    var keyHint: String {
+        switch self {
+        case .anthropic: return "Paste key (sk-ant-…)"
+        case .openai: return "Paste key (sk-…)"
+        case .gemini: return "Paste key (AIza…)"
+        case .mistral: return "Paste key"
+        }
+    }
+
     var keyURL: URL {
-        URL(string: self == .anthropic ? "https://console.anthropic.com/settings/keys"
-                                       : "https://platform.openai.com/api-keys")!
+        switch self {
+        case .anthropic: return URL(string: "https://console.anthropic.com/settings/keys")!
+        case .openai: return URL(string: "https://platform.openai.com/api-keys")!
+        case .gemini: return URL(string: "https://aistudio.google.com/app/apikey")!
+        case .mistral: return URL(string: "https://console.mistral.ai/api-keys")!
+        }
+    }
+
+    /// Base URL of the provider's OpenAI-compatible API; Anthropic uses its own Messages API instead.
+    var openAICompatibleBase: String? {
+        switch self {
+        case .anthropic: return nil
+        case .openai: return "https://api.openai.com/v1"
+        case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
+        case .mistral: return "https://api.mistral.ai/v1"
+        }
     }
 }
 

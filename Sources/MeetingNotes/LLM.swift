@@ -39,8 +39,8 @@ enum LLM {
             throw AppError("Add your \(provider.title) API key in Settings.")
         }
         guard !model.isEmpty else { throw AppError("Pick a model in Settings.") }
-        switch provider {
-        case .anthropic:
+
+        guard let base = provider.openAICompatibleBase else {
             var request = anthropicRequest("messages", key: key)
             request.httpMethod = "POST"
             request.timeoutInterval = 600
@@ -49,36 +49,47 @@ enum LLM {
             let json = try await HTTP.json(request, body: try JSONSerialization.data(withJSONObject: body))
             let blocks = json["content"] as? [[String: Any]] ?? []
             return blocks.compactMap { $0["text"] as? String }.joined()
-        case .openai:
-            var request = openAIRequest("chat/completions", key: key)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 600
-            let body: [String: Any] = ["model": model, "messages": [["role": "system", "content": systemPrompt],
-                                                                    ["role": "user", "content": user]]]
-            let json = try await HTTP.json(request, body: try JSONSerialization.data(withJSONObject: body))
-            let message = (json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any]
-            return message?["content"] as? String ?? ""
         }
+
+        var request = openAIRequest(base, "chat/completions", key: key)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 600
+        let body: [String: Any] = ["model": model, "messages": [["role": "system", "content": systemPrompt],
+                                                                ["role": "user", "content": user]]]
+        let json = try await HTTP.json(request, body: try JSONSerialization.data(withJSONObject: body))
+        let message = (json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any]
+        return message?["content"] as? String ?? ""
     }
 
-    /// Lists the models available to the key, newest first, so new releases appear without an app update.
+    /// Lists the chat models available to the key, newest first, so new releases appear without an app update.
     static func models(for provider: Provider) async throws -> [String] {
         guard let key = Keychain.get(provider.rawValue) else { return [] }
-        switch provider {
-        case .anthropic:
+        guard let base = provider.openAICompatibleBase else {
             let json = try await HTTP.json(anthropicRequest("models?limit=100", key: key))
             return (json["data"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
-        case .openai:
-            let json = try await HTTP.json(openAIRequest("models", key: key))
-            let skip = ["audio", "realtime", "transcribe", "tts", "image", "search", "instruct", "embedding", "moderation"]
-            return (json["data"] as? [[String: Any]] ?? [])
-                .filter {
-                    guard let id = $0["id"] as? String else { return false }
-                    let isChat = id.hasPrefix("gpt") || id.range(of: "^o\\d", options: .regularExpression) != nil
-                    return isChat && !skip.contains(where: id.contains)
-                }
-                .sorted { ($0["created"] as? Int ?? 0) > ($1["created"] as? Int ?? 0) }
-                .compactMap { $0["id"] as? String }
+        }
+
+        let json = try await HTTP.json(openAIRequest(base, "models", key: key))
+        return (json["data"] as? [[String: Any]] ?? [])
+            .compactMap { item -> (id: String, created: Int)? in
+                // Gemini prefixes ids with "models/", but chat requests take the bare name.
+                guard let raw = item["id"] as? String else { return nil }
+                let id = raw.replacingOccurrences(of: "models/", with: "")
+                return isChatModel(id, item, provider) ? (id, item["created"] as? Int ?? 0) : nil
+            }
+            .sorted { ($0.created, $0.id) > ($1.created, $1.id) }
+            .map(\.id)
+    }
+
+    private static func isChatModel(_ id: String, _ item: [String: Any], _ provider: Provider) -> Bool {
+        let skip = ["audio", "realtime", "transcribe", "tts", "image", "search", "instruct", "embed",
+                    "moderation", "ocr", "live"]
+        guard !skip.contains(where: id.contains) else { return false }
+        switch provider {
+        case .openai: return id.hasPrefix("gpt") || id.range(of: "^o\\d", options: .regularExpression) != nil
+        case .gemini: return id.contains("gemini")
+        case .mistral: return (item["capabilities"] as? [String: Any])?["completion_chat"] as? Bool ?? true
+        case .anthropic: return true
         }
     }
 
@@ -90,8 +101,8 @@ enum LLM {
         return request
     }
 
-    private static func openAIRequest(_ path: String, key: String) -> URLRequest {
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/\(path)")!)
+    private static func openAIRequest(_ base: String, _ path: String, key: String) -> URLRequest {
+        var request = URLRequest(url: URL(string: "\(base)/\(path)")!)
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return request

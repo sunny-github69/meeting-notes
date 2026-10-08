@@ -1,7 +1,7 @@
 # MeetingNotes
 
 A free, open-source, lightweight macOS menu-bar app that records a Zoom meeting **locally** and turns
-it into a short summary plus long, detailed notes, using your own Claude or OpenAI API key.
+it into a short summary plus long, detailed notes, using your own Claude, OpenAI, Gemini or Mistral API key.
 
 It does not join the call as a bot and adds nothing to the meeting, so Zoom does not notify other
 participants. Recording laws differ by country and company. See [Responsible use](#responsible-use).
@@ -21,7 +21,7 @@ participants. Recording laws differ by country and company. See [Responsible use
   Vision), so the transcript says `Priya Sharma:` instead of `Others:`. Frames are never saved.
 - **Audio-only fallback:** if Zoom is minimised or on another Space, recording carries on, those lines
   are labelled `Not recognised`, and speaker detection resumes on its own when the window is back.
-- **Bring your own AI:** Claude (Anthropic) or ChatGPT (OpenAI). The model list is fetched live from the
+- **Bring your own AI:** Claude (Anthropic), ChatGPT (OpenAI), Gemini (Google) or Mistral. The model list is fetched live from the
   provider, so new models appear without an app update. Keys are kept in the macOS Keychain.
 - **Free transcription:** offline `whisper.cpp`, or the OpenAI Whisper API if you prefer.
 - **Hands-free:** optional auto-record when a Zoom meeting starts, launch at login, and a macOS
@@ -72,7 +72,7 @@ James asked whether Thursday is still realistic ...
 
 ```text
 Zoom audio ─┐                       ┌─ whisper.cpp (local, free) ─┐
-            ├─ 16 kHz WAV chunks ───┤                             ├─ transcript.md ─ Claude / GPT ─ notes.md
+            ├─ 16 kHz WAV chunks ───┤                             ├─ transcript.md ─ your AI ────── notes.md
 Microphone ─┘                       └─ OpenAI Whisper API ────────┘        ▲
 Zoom window frames (1 fps) ─ green border + OCR ─ speaker timeline ───────┘
 ```
@@ -127,9 +127,10 @@ A waveform icon appears in the menu bar (top right). There is no Dock icon; that
 
 Click the menu-bar icon, then the ⚙︎ button in the top-right corner of the popover:
 
-- **AI notes**: pick Claude or ChatGPT, paste your API key (create one at
-  [console.anthropic.com](https://console.anthropic.com) or
-  [platform.openai.com](https://platform.openai.com/api-keys)). It is checked live ("Key works · N models")
+- **AI notes**: pick a provider and paste its API key. The **Get a key** link opens the right page:
+  [Anthropic](https://console.anthropic.com/settings/keys), [OpenAI](https://platform.openai.com/api-keys),
+  [Google AI Studio](https://aistudio.google.com/app/apikey) or [Mistral](https://console.mistral.ai/api-keys).
+  Each provider's key is saved separately, so you can switch between them. It is checked live ("Key works · N models")
   and the model list loads; pick a model. Keys are stored in the macOS Keychain, never in files.
   Turn AI notes off to save only the transcript.
 - **General**: *Launch at login*, *Auto-record when a Zoom meeting starts*, your name (used instead
@@ -186,7 +187,7 @@ allow it again. Settings and API keys are kept.
 | Notes have no "Others" lines | Screen & System Audio Recording permission is missing; grant it and reopen the app. |
 | Every line is "Not recognised" | Use Zoom's Gallery view and keep the Zoom window visible. |
 | "Couldn't change login item" | Move the app to `/Applications` first. |
-| API error | Check the key and the account's credit in the Claude / OpenAI console. |
+| API error | Check the key and the account's credit in the provider's console. |
 
 ### Uninstall
 

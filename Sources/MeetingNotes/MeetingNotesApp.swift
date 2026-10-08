@@ -254,7 +254,7 @@ struct AISettings: View {
                 Picker("Provider", selection: $providerRaw) {
                     ForEach(Provider.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                SecureField("API key", text: $apiKey, prompt: Text("Paste key (\(provider.keyPrefix)…)"))
+                SecureField("API key", text: $apiKey, prompt: Text(provider.keyHint))
                     .textFieldStyle(.roundedBorder)
                 HStack {
                     Picker("Model", selection: $selectedModel) {
