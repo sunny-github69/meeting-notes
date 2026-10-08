@@ -72,9 +72,11 @@ enum Transcriber {
     }
 
     private static func local(_ wav: URL) async throws -> [Raw] {
-        let candidates = ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"]
+        // Apps launched from Finder don't get the shell's PATH, so look in Homebrew's prefixes directly.
+        // Older whisper-cpp formulae named the binary "whisper-cpp" instead of "whisper-cli".
+        let candidates = ["/opt/homebrew/bin", "/usr/local/bin"].flatMap { ["\($0)/whisper-cli", "\($0)/whisper-cpp"] }
         guard let bin = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
-            throw AppError("whisper-cli not found. Run: brew install whisper-cpp")
+            throw AppError("whisper.cpp not found in /opt/homebrew/bin or /usr/local/bin. Run: brew install whisper-cpp")
         }
         guard FileManager.default.fileExists(atPath: Prefs.whisperModel) else {
             throw AppError("Whisper model not found at \(Prefs.whisperModel). See the README.")
