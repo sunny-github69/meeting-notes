@@ -241,7 +241,7 @@ and the trained weights are two different things.
 |---|---|---|
 | `large-v3` | Whisper's largest, most accurate model generation | Best accuracy on accents and technical words |
 | `turbo` | large-v3 with the decoder cut from 32 layers to 4 | Several times faster, with only a small accuracy loss |
-| `q5_0` | Weights quantised from 16-bit to about 5-bit numbers | ~550 MB instead of ~1.6 GB, less memory, faster, near-identical output |
+| `q5_0` | Weights quantised from 16-bit to about 5-bit numbers | 574 MB instead of 1,625 MB, less memory, faster, near-identical output |
 
 Together this gives close to the best Whisper accuracy at a size and speed that suits a laptop. On
 Apple Silicon it transcribes much faster than real time. On slower machines a smaller model trades
@@ -251,9 +251,9 @@ in Settings → Transcription:
 
 | Model file | Size | When to use |
 |---|---|---|
-| `ggml-large-v3-turbo-q5_0.bin` | ~550 MB | Default: best balance of accuracy and speed |
-| `ggml-small.en-q5_1.bin` | ~190 MB | Older or Intel Macs; less accurate on strong accents |
-| `ggml-large-v3.bin` | ~3 GB | Maximum accuracy, much slower |
+| `ggml-large-v3-turbo-q5_0.bin` | 574 MB | Default: best balance of accuracy and speed |
+| `ggml-small.en-q5_1.bin` | 190 MB | Older or Intel Macs; less accurate with heavy accents |
+| `ggml-large-v3.bin` | 3.1 GB | Maximum accuracy, much slower |
 
 **Two settings make it better for this use:**
 
@@ -319,7 +319,7 @@ xcode-select --install
 brew install whisper-cpp
 ```
 
-### 2. Download the speech model (one time, ~550 MB)
+### 2. Download the speech model (one time, 574 MB)
 
 ```bash
 mkdir -p ~/Library/Application\ Support/MeetingNotes
