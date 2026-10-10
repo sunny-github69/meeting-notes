@@ -7,9 +7,9 @@
 # permissions survive rebuilds. Override the name with CODESIGN_IDENTITY="…".
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build -c release
 APP=build/MeetingNotes.app
-rm -rf "$APP"
+rm -rf "$APP"  # first, so a failed build can't leave an old app behind to be installed by mistake
+swift build -c release
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/MeetingNotes "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
