@@ -10,9 +10,10 @@ cd "$(dirname "$0")/.."
 swift build -c release
 APP=build/MeetingNotes.app
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/MeetingNotes "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 
 IDENTITY="${CODESIGN_IDENTITY:-MeetingNotes Local}"
 if security find-identity -p codesigning | grep -q "\"$IDENTITY\""; then

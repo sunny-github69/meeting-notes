@@ -1,3 +1,5 @@
+<img src="docs/icon.png" width="96" align="right" alt="MeetingNotes icon">
+
 # MeetingNotes
 
 A free, open-source, lightweight macOS menu-bar app that records online meetings **locally** (Zoom,
@@ -231,7 +233,8 @@ mac-app/
     ├── Package.swift            Swift Package: macOS 13+, no third-party dependencies
     ├── Resources/Info.plist     Bundle id, menu-bar-only app (no Dock icon), microphone prompt text
     ├── scripts/build_app.sh     Builds a release binary, wraps it into MeetingNotes.app, signs it ad hoc
-    ├── docs/                    Screenshots used in this README
+    ├── Resources/AppIcon.icns   App icon (regenerate with scripts/make_icon.py, needs Pillow)
+    ├── docs/                    Screenshots and the icon used in this README
     └── Sources/MeetingNotes/
         ├── MeetingNotesApp.swift   App entry point and the Settings window (General, AI notes, Transcription)
         ├── MenuView.swift          Menu-bar popover: recording card, progress steps, rename/preview card, recent list
