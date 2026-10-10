@@ -503,7 +503,9 @@ struct ActiveJobRow: View {
     }
 
     private var notesLabel: String {
-        if case .writingNotes(let model) = job.phase { return "Writing notes · \(model)" }
+        if case .writingNotes(let model, let detail) = job.phase {
+            return ["Writing notes", model, detail].compactMap { $0 }.joined(separator: " · ")
+        }
         return "Writing notes"
     }
 

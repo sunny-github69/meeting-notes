@@ -28,7 +28,7 @@ struct SettingsView: View {
             AISettings().tabItem { Label("AI notes", systemImage: "sparkles") }
             TranscriptionSettings().tabItem { Label("Transcription", systemImage: "waveform") }
         }
-        .frame(width: 500, height: 380)
+        .frame(width: 520, height: 480)
     }
 }
 
@@ -113,6 +113,7 @@ struct AISettings: View {
                 }
             }
             .disabled(!enabled)
+            FallbackSection().disabled(!enabled)
         }
         .formStyle(.grouped)
         .onAppear(perform: load)
@@ -166,6 +167,55 @@ struct AISettings: View {
     private func reloadModels() async {
         await model.refreshModels(for: provider)
         if !model.models.contains(selectedModel), let first = model.models.first { selectedModel = first }
+    }
+}
+
+/// A second model that writes the notes when the main one still fails after its automatic retries.
+struct FallbackSection: View {
+    @AppStorage("fallbackEnabled") private var enabled = false
+    @AppStorage("fallbackProvider") private var providerRaw = Provider.ollama.rawValue
+    @AppStorage("fallbackModel") private var modelName = ""
+    @State private var models: [String] = []
+    @State private var loadError: String?
+
+    private var provider: Provider { Provider(rawValue: providerRaw) ?? .ollama }
+
+    var body: some View {
+        Section {
+            Toggle("Use a fallback model if notes fail", isOn: $enabled)
+            if enabled {
+                Picker("Provider", selection: $providerRaw) {
+                    ForEach(Provider.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Picker("Model", selection: $modelName) {
+                    ForEach(models, id: \.self) { Text($0).tag($0) }
+                }
+                if let loadError {
+                    Label(loadError, systemImage: "xmark.octagon.fill").font(.caption).foregroundStyle(.red)
+                } else if models.isEmpty {
+                    Text(provider.needsKey
+                         ? "No key saved for \(provider.title): pick it as the main provider once to add its key."
+                         : "Start Ollama and pull a model, e.g. ollama pull llama3.1.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Fallback")
+        } footer: {
+            Text("Tried when the main model keeps failing, e.g. a cloud model as main and a local Ollama model as fallback. The notes show which model wrote them.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .task(id: "\(enabled)|\(providerRaw)") {
+            guard enabled else { return }
+            do {
+                models = try await LLM.models(for: provider)
+                loadError = nil
+            } catch {
+                models = []
+                loadError = error.localizedDescription
+            }
+            if !models.contains(modelName), let first = models.first { modelName = first }
+        }
     }
 }
 

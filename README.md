@@ -67,6 +67,10 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
 - **Resilient:** rate limits, overloaded servers and dropped connections are retried automatically
   (2 s, 8 s, 30 s, honouring `Retry-After`); a bad key or retired model fails at once with a clear
   message. **Retry** resumes where it stopped: finished transcript parts aren't transcribed again.
+- **Fallback model:** optionally name a second model (e.g. cloud as main, local Ollama as backup) that
+  writes the notes when the main one keeps failing.
+- **Long meetings:** transcripts too long for one request are summarised part by part and then combined
+  (map-reduce), so multi-hour meetings still get complete notes.
 - **Hands-free:** optional auto-record when a Zoom, Meet or Teams call starts (and stop when it ends),
   launch at login, and a macOS notification when the notes are ready.
 
@@ -173,8 +177,16 @@ James asked whether Thursday is still realistic ...
   key, unknown or retired model) are shown straight away with **Retry** and **Discard** buttons.
 - **How long can a meeting be?** Recording has no limit (about 230 MB of temporary audio per hour).
   An hour of talk is roughly 8–10k words (~12–15k tokens), which cloud models such as Gemini, Claude and
-  GPT read in one go; their context windows hold many hours. Very long meetings can hit the model's
-  *output* limit for the detailed notes, and small local models get weaker on long transcripts.
+  GPT read in one go.
+- **Map-reduce for long meetings.** Above ~160k characters (roughly 3 hours) for cloud models, or ~40k
+  (roughly 45 minutes) for local Ollama models, which lose detail on long input much sooner, the
+  transcript is split at speaker turns into parts. Each part gets its own notes, then one more request
+  combines them into the usual Summary / Decisions / Action items / Detailed notes. The same happens if a
+  single-pass reply is cut off at the model's output limit (`max_tokens` / `length`). Progress shows
+  "part 2 of 4" and "combining 4 parts".
+- **Fallback model.** Settings → AI notes → Fallback. When the main model still fails after its retries,
+  the fallback writes the notes instead (using the API key saved for its provider), and the notes card
+  shows which model it was. If both fail, the error names both and **Retry** is offered.
 - **Progress %.** Transcription progress is weighted by each part's length and, for local whisper.cpp,
   read live from its `progress = NN%` output. The AI returns its notes in one piece, so that last stretch
   eases towards 97% at a pace based on the transcript's length and completes when the notes arrive.
@@ -280,7 +292,8 @@ mac-app/
         ├── SpeakerDetector.swift   Highlight detection, Vision OCR, window-visible check, speaker timeline,
         │                           participant names
         ├── Transcriber.swift       whisper.cpp / Whisper API calls, timestamps, transcript formatting
-        ├── LLM.swift               Notes prompt; Anthropic API, OpenAI-compatible API (OpenAI, Gemini,
+        ├── NotesWriter.swift       Single pass or map-reduce for long meetings, fallback model, eased progress
+        ├── LLM.swift               Notes prompts; Anthropic API, OpenAI-compatible API (OpenAI, Gemini,
         │                           Mistral) and Ollama's local API; live model lists
         ├── Support.swift           Providers, preferences, Keychain, HTTP helper
         └── System.swift            Launch at login, macOS notifications

@@ -28,6 +28,22 @@ enum LLM {
     reasons and trade-offs that were mentioned.
     """
 
+    /// For long meetings (map step): notes for one part, to be combined later with `systemPrompt`.
+    static let partPrompt = """
+    You write working notes for ONE part of a longer online-meeting transcript; they will later be combined \
+    with the notes of the other parts. The transcript comes from speech recognition, so fix obvious \
+    mishearings from context but never invent facts. Keep speaker names exactly as given.
+
+    In Markdown bullets, in the order discussed, cover: the topics and what was said about them; decisions; \
+    action items with owner and due date when mentioned; open questions; numbers, names, reasons and \
+    trade-offs. Be thorough but concise. No title and no overall summary.
+    """
+
+    struct Reply {
+        let text: String
+        let truncated: Bool  // the model hit its output limit and stopped mid-way
+    }
+
     /// The "# Title" first line of the notes, if the model wrote one.
     static func title(fromNotes notes: String) -> String? {
         guard let first = notes.split(separator: "\n", omittingEmptySubsequences: true).first,
@@ -36,20 +52,17 @@ enum LLM {
         return title.isEmpty ? nil : String(title.prefix(80))
     }
 
-    static func userMessage(transcript: String, app: MeetingApp?, recordedBy: String, speakers: [String],
-                            namesOnScreen: [String]) -> String {
+    /// The facts about the meeting that every request starts with.
+    static func header(app: MeetingApp?, recordedBy: String, speakers: [String], namesOnScreen: [String]) -> String {
         """
         Meeting app: \(app?.title ?? "unknown")
         Recorded by: \(recordedBy)
         Speakers: \(speakers.joined(separator: ", "))
         Names seen on screen: \(namesOnScreen.isEmpty ? "none" : namesOnScreen.joined(separator: ", "))
-
-        Transcript:
-        \(transcript)
         """
     }
 
-    static func complete(provider: Provider, model: String, user: String) async throws -> String {
+    static func complete(provider: Provider, model: String, system: String, user: String) async throws -> Reply {
         let key = Keychain.get(provider.rawValue) ?? ""
         guard !provider.needsKey || !key.isEmpty else {
             throw AppError("Add your \(provider.title) API key in Settings.")
@@ -61,22 +74,25 @@ enum LLM {
             var request = anthropicRequest("messages", key: key)
             request.httpMethod = "POST"
             request.timeoutInterval = 600
-            let body: [String: Any] = ["model": model, "max_tokens": 8192, "system": systemPrompt,
+            let body: [String: Any] = ["model": model, "max_tokens": 8192, "system": system,
                                        "messages": [["role": "user", "content": user]]]
             let json = try await HTTP.json(request, body: try JSONSerialization.data(withJSONObject: body))
             let blocks = json["content"] as? [[String: Any]] ?? []
-            return blocks.compactMap { $0["text"] as? String }.joined()
+            return Reply(text: blocks.compactMap { $0["text"] as? String }.joined(),
+                         truncated: json["stop_reason"] as? String == "max_tokens")
         case .ollama:
-            return try await ollamaComplete(model: model, user: user)
+            return try await ollamaComplete(model: model, system: system, user: user)
         case .openai, .gemini, .mistral:
             var request = openAIRequest(provider.openAICompatibleBase!, "chat/completions", key: key)
             request.httpMethod = "POST"
             request.timeoutInterval = 600
-            let body: [String: Any] = ["model": model, "messages": [["role": "system", "content": systemPrompt],
+            let body: [String: Any] = ["model": model, "messages": [["role": "system", "content": system],
                                                                     ["role": "user", "content": user]]]
             let json = try await HTTP.json(request, body: try JSONSerialization.data(withJSONObject: body))
-            let message = (json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any]
-            return message?["content"] as? String ?? ""
+            let choice = (json["choices"] as? [[String: Any]])?.first
+            let message = choice?["message"] as? [String: Any]
+            return Reply(text: message?["content"] as? String ?? "",
+                         truncated: choice?["finish_reason"] as? String == "length")
         }
     }
 
@@ -117,25 +133,26 @@ enum LLM {
     /// Uses Ollama's own chat API rather than its OpenAI-compatible one, because only this API lets us
     /// raise the context window: Ollama's default is a few thousand tokens and it silently drops the
     /// start of anything longer, which would cut most of a long meeting.
-    private static func ollamaComplete(model: String, user: String) async throws -> String {
+    private static func ollamaComplete(model: String, system: String, user: String) async throws -> Reply {
         var request = URLRequest(url: URL(string: "\(ollamaBase)/chat")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 1800  // local models take longer on an hour-long transcript
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let estimatedTokens = (systemPrompt.count + user.count) / 3 + 4096  // ~3 chars per token, plus the reply
+        let estimatedTokens = (system.count + user.count) / 3 + 4096  // ~3 chars per token, plus the reply
         let body: [String: Any] = [
             "model": model,
             "stream": false,
             "options": ["num_ctx": min(max(8192, estimatedTokens), 131_072)],
-            "messages": [["role": "system", "content": systemPrompt], ["role": "user", "content": user]],
+            "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
         let json = try await reachOllama {
             try await HTTP.json(request, body: try JSONSerialization.data(withJSONObject: body))
         }
         let content = (json["message"] as? [String: Any])?["content"] as? String ?? ""
         // Reasoning models (e.g. DeepSeek-R1, Qwen3) may include their thinking inline.
-        return content.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression)
+        let text = content.replacingOccurrences(of: "(?s)<think>.*?</think>", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Reply(text: text, truncated: json["done_reason"] as? String == "length")
     }
 
     private static func reachOllama<T>(_ call: () async throws -> T) async throws -> T {

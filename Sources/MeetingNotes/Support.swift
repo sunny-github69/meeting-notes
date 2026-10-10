@@ -68,6 +68,12 @@ enum STTEngine: String, CaseIterable, Identifiable {
     var title: String { self == .local ? "Local whisper.cpp (free, offline)" : "OpenAI Whisper API" }
 }
 
+/// A provider and one of its models.
+struct NotesTarget: Equatable {
+    let provider: Provider
+    let model: String
+}
+
 /// Non-secret settings, shared with the views through matching @AppStorage keys.
 enum Prefs {
     static let defaultName = NSFullUserName().split(separator: " ").first.map(String.init) ?? "Me"
@@ -94,6 +100,16 @@ enum Prefs {
     static var whisperModel: String { defaults.string(forKey: "whisperModelPath") ?? defaultWhisperModel }
     // Key name kept from the Zoom-only version so existing settings carry over.
     static var autoDetectZoom: Bool { defaults.bool(forKey: "autoDetectZoom") }
+    static var notesTarget: NotesTarget { NotesTarget(provider: provider, model: model(for: provider)) }
+
+    /// The model to try when the main one fails, if the user turned that on.
+    static var fallbackTarget: NotesTarget? {
+        guard defaults.bool(forKey: "fallbackEnabled"),
+              let provider = Provider(rawValue: defaults.string(forKey: "fallbackProvider") ?? ""),
+              let model = defaults.string(forKey: "fallbackModel"), !model.isEmpty else { return nil }
+        return NotesTarget(provider: provider, model: model)
+    }
+
     static func model(for provider: Provider) -> String { defaults.string(forKey: "model.\(provider.rawValue)") ?? "" }
 }
 

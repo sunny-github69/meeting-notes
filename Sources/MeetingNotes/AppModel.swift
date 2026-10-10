@@ -22,7 +22,7 @@ final class AppModel: ObservableObject {
         enum Phase: Equatable {
             case queued
             case transcribing(part: Int, of: Int)
-            case writingNotes(model: String)
+            case writingNotes(model: String, detail: String?)  // detail: "part 2 of 4", "fallback", …
             case failed(String)
         }
 
@@ -232,33 +232,23 @@ final class AppModel: ObservableObject {
         return saved
     }
 
-    /// Asks the selected AI for notes and saves them as notes.md, tagged with the model that wrote them.
+    /// Asks the AI for notes (map-reduce for long meetings, fallback model if set) and saves them as
+    /// notes.md, tagged with the model that wrote them.
     private func writeNotes(transcript: String, in dir: URL, progressFrom start: Double) async throws -> String {
-        let provider = Prefs.provider
-        let model = Prefs.model(for: provider)
-        update(dir) { $0.phase = .writingNotes(model: model); $0.progress = start }
-
-        // The AI answers in one piece, so the bar eases towards 97% at a pace set by the transcript's
-        // length (local models are slower), then jumps to done.
-        let expected = provider == .ollama ? 40 + Double(transcript.count) / 400 : 10 + Double(transcript.count) / 4000
-        let ticker = Task { [weak self] in
-            let began = Date()
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                let eased = 1 - exp(-Date().timeIntervalSince(began) / expected)
-                self?.update(dir) { $0.progress = start + (0.97 - start) * eased }
-            }
-        }
-        defer { ticker.cancel() }
-
         let context = (try? Data(contentsOf: dir.appendingPathComponent(NotesContext.fileName)))
             .flatMap { try? JSONDecoder().decode(NotesContext.self, from: $0) } ?? NotesContext(app: nil, participants: [])
-        let notes = try await LLM.complete(
-            provider: provider, model: model,
-            user: LLM.userMessage(transcript: transcript, app: context.app.flatMap(MeetingApp.init(rawValue:)),
-                                  recordedBy: Prefs.yourName, speakers: Transcriber.speakers(in: transcript),
-                                  namesOnScreen: context.participants))
-        let tagged = notes + "\n\n<!-- notes-model: \(model) (\(provider.title)) -->\n"
+        let writer = NotesWriter(
+            transcript: transcript,
+            header: LLM.header(app: context.app.flatMap(MeetingApp.init(rawValue:)), recordedBy: Prefs.yourName,
+                               speakers: Transcriber.speakers(in: transcript), namesOnScreen: context.participants)
+        ) { [weak self] model, detail, fraction in
+            self?.update(dir) {
+                $0.phase = .writingNotes(model: model, detail: detail)
+                $0.progress = start + (1 - start) * fraction
+            }
+        }
+        let (notes, target) = try await writer.write(primary: Prefs.notesTarget, fallback: Prefs.fallbackTarget)
+        let tagged = notes + "\n\n<!-- notes-model: \(target.model) (\(target.provider.title)) -->\n"
         try tagged.write(to: dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
         return notes
     }
