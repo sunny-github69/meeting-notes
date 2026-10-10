@@ -24,6 +24,8 @@ final class AppModel: ObservableObject {
         let file: URL  // notes.md, else transcript.md
         let hasNotes: Bool
         let summary: [String]  // first bullets of the Summary section
+        let notesModel: String?  // which AI model wrote notes.md
+        let app: MeetingApp?
 
         var displayTitle: String { title ?? date.formatted(date: .abbreviated, time: .shortened) }
     }
@@ -35,6 +37,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var models: [String] = []
     @Published private(set) var modelsLoading = false
     @Published private(set) var modelsError: String?
+    @Published private(set) var notesError: String?  // a failed "Regenerate"; the old notes stay
 
     private let recorder = Recorder()
     private var session: (dir: URL, recording: Recording?)?
@@ -84,6 +87,7 @@ final class AppModel: ObservableObject {
                 self?.speakerStatus = status
             }
             session = (dir, nil)
+            notesError = nil
             meetingApp = app
             autoStarted = auto
             missedPolls = 0
@@ -118,19 +122,12 @@ final class AppModel: ObservableObject {
             guard !segments.isEmpty else { throw AppError("No speech was detected.") }
             let transcript = Transcriber.format(segments)
             try transcript.write(to: session.dir.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
+            let context = NotesContext(app: recording.app?.rawValue, participants: recording.participants)
+            try? JSONEncoder().encode(context).write(to: session.dir.appendingPathComponent(NotesContext.fileName))
             var title: String?
 
             if Prefs.aiNotesEnabled {
-                let provider = Prefs.provider
-                let model = Prefs.model(for: provider)
-                state = .processing(.writingNotes(model: model))
-                var seen = Set<String>()
-                let speakers = segments.map(\.speaker).filter { seen.insert($0).inserted }
-                let notes = try await LLM.complete(
-                    provider: provider, model: model,
-                    user: LLM.userMessage(transcript: transcript, app: recording.app, recordedBy: Prefs.yourName,
-                                          speakers: speakers, namesOnScreen: recording.participants))
-                try notes.write(to: session.dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
+                let notes = try await writeNotes(transcript: transcript, context: context, in: session.dir)
                 title = LLM.title(fromNotes: notes)
             }
 
@@ -187,6 +184,44 @@ final class AppModel: ObservableObject {
 
     // MARK: Menu & settings helpers
 
+    /// Writes notes.md again from the saved transcript with the currently selected model, e.g. when a
+    /// small local model gave a weak result. A name the user chose is kept; on failure the old notes stay.
+    func regenerateNotes(_ meeting: Meeting) async {
+        guard !isBusy else { return }
+        guard let transcript = try? String(contentsOf: meeting.id.appendingPathComponent("transcript.md"), encoding: .utf8)
+        else { notesError = "The transcript for this meeting is missing."; return }
+        let context = (try? Data(contentsOf: meeting.id.appendingPathComponent(NotesContext.fileName)))
+            .flatMap { try? JSONDecoder().decode(NotesContext.self, from: $0) } ?? NotesContext(app: nil, participants: [])
+        notesError = nil
+        do {
+            let notes = try await writeNotes(transcript: transcript, context: context, in: meeting.id)
+            var updated = Self.meeting(at: meeting.id) ?? meeting
+            if meeting.title == nil, let title = LLM.title(fromNotes: notes), let renamed = try? move(updated, to: title) {
+                updated = renamed
+            }
+            state = .done(updated)
+            refreshRecent()
+        } catch {
+            notesError = error.localizedDescription
+            state = .done(meeting)
+        }
+    }
+
+    /// Asks the selected AI for notes and saves them as notes.md, tagged with the model that wrote them.
+    private func writeNotes(transcript: String, context: NotesContext, in dir: URL) async throws -> String {
+        let provider = Prefs.provider
+        let model = Prefs.model(for: provider)
+        state = .processing(.writingNotes(model: model))
+        let notes = try await LLM.complete(
+            provider: provider, model: model,
+            user: LLM.userMessage(transcript: transcript, app: context.app.flatMap(MeetingApp.init(rawValue:)),
+                                  recordedBy: Prefs.yourName, speakers: Transcriber.speakers(in: transcript),
+                                  namesOnScreen: context.participants))
+        let tagged = notes + "\n\n<!-- notes-model: \(model) (\(provider.title)) -->\n"
+        try tagged.write(to: dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
+        return notes
+    }
+
     func refreshRecent() {
         let dirs = (try? FileManager.default.contentsOfDirectory(
             at: Self.notesRoot, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
@@ -235,21 +270,30 @@ final class AppModel: ObservableObject {
         let notes = dir.appendingPathComponent("notes.md")
         let transcript = dir.appendingPathComponent("transcript.md")
         guard let file = [notes, transcript].first(where: { fm.fileExists(atPath: $0.path) }) else { return nil }
-        let summary = file == notes ? summaryBullets(of: notes) : []
+        let text = file == notes ? (try? String(contentsOf: notes, encoding: .utf8)) ?? "" : ""
+        let context = (try? Data(contentsOf: dir.appendingPathComponent(NotesContext.fileName)))
+            .flatMap { try? JSONDecoder().decode(NotesContext.self, from: $0) }
         return Meeting(id: dir, date: date, title: title?.isEmpty == false ? title : nil,
-                       file: file, hasNotes: file == notes, summary: summary)
+                       file: file, hasNotes: file == notes, summary: summaryBullets(in: text),
+                       notesModel: notesModel(in: text), app: context?.app.flatMap(MeetingApp.init(rawValue:)))
     }
 
     /// The first bullets under "## Summary" in notes.md, for a preview in the menu.
-    private static func summaryBullets(of notes: URL, limit: Int = 3) -> [String] {
-        guard let text = try? String(contentsOf: notes, encoding: .utf8) else { return [] }
-        let lines = text.components(separatedBy: .newlines)
+    private static func summaryBullets(in notes: String, limit: Int = 3) -> [String] {
+        let lines = notes.components(separatedBy: .newlines)
         guard let start = lines.firstIndex(where: { $0.hasPrefix("## Summary") }) else { return [] }
         return lines[(start + 1)...]
             .prefix { !$0.hasPrefix("## ") }
             .filter { $0.hasPrefix("- ") || $0.hasPrefix("* ") }
             .prefix(limit)
             .map { String($0.dropFirst(2)) }
+    }
+
+    /// The model named in the hidden "<!-- notes-model: … -->" tag at the end of notes.md.
+    private static func notesModel(in notes: String) -> String? {
+        guard let tag = notes.range(of: "<!-- notes-model: ") else { return nil }
+        let rest = notes[tag.upperBound...]
+        return rest.range(of: " -->").map { String(rest[..<$0.lowerBound]) }
     }
 
     func refreshModels(for provider: Provider) async {
@@ -263,4 +307,11 @@ final class AppModel: ObservableObject {
             modelsError = error.localizedDescription
         }
     }
+}
+
+/// What the notes AI needs besides the transcript, saved next to it so notes can be regenerated later.
+struct NotesContext: Codable {
+    static let fileName = "meeting.json"
+    let app: String?  // MeetingApp raw value
+    let participants: [String]  // names seen on screen
 }

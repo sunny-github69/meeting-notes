@@ -49,6 +49,8 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
   or **Ollama** for a fully local, free and offline pipeline (no API key). The model list is fetched live from the
   provider, so new models appear without an app update. Keys are kept in the macOS Keychain.
 - **Free transcription:** offline `whisper.cpp`, or the OpenAI Whisper API if you prefer.
+- **Regenerate with another model:** if a (small, local) model writes weak notes, pick a different one
+  in the menu and regenerate from the saved transcript in seconds.
 - **Named and organised:** the notes AI suggests a short title, and the meeting is saved as
   `2026-10-10 1111 · Sprint planning`. After saving you can rename it right in the menu (✓ to save,
   ✕/Esc to keep the saved name), and every recent meeting can be renamed, copied, shown in Finder or
@@ -337,8 +339,12 @@ To test speaker names, join the same meeting from a phone and talk from there.
 - **Manual:** menu-bar icon → **Start recording** → **Stop & write notes**.
 - **Automatic:** turn on **Auto-record meetings**. Recording starts when you join a meeting and
   the notes are written when you leave. Pressing Stop mid-meeting stops it for that meeting.
-- When notes are ready the menu shows the name, a short summary preview and **Open / Copy / Finder**
-  buttons. Type a new name and press Return (or ✓) to rename; Esc or ✕ keeps the saved name.
+- When notes are ready the menu shows the name, the app, which model wrote the notes, a short
+  summary preview and **Open / Copy / Finder / New** buttons. Type a new name and press Return (or ✓)
+  to rename; Esc or ✕ keeps the saved name.
+- **Not happy with the notes?** In the same card pick another model from the dropdown and press
+  **Regenerate**: the notes are rewritten from the saved transcript (no new transcription). If it fails,
+  the previous notes stay. This is available for the latest meeting.
 - The last five meetings are listed under **Recent**: click to open, hover for ✏️ rename and 🗑 trash,
   right-click for more. **All notes** opens the folder with every meeting.
 

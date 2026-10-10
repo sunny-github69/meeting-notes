@@ -25,6 +25,18 @@ enum Transcriber {
         return segments.filter { !$0.text.isEmpty }.sorted { $0.start < $1.start }
     }
 
+    /// Speaker names in order of first appearance, read back from a formatted transcript.
+    static func speakers(in transcript: String) -> [String] {
+        var seen = Set<String>()
+        return transcript.components(separatedBy: .newlines).compactMap { line -> String? in
+            guard line.hasPrefix("["), let close = line.firstIndex(of: "]") else { return nil }
+            let rest = line[line.index(after: close)...]
+            guard let colon = rest.firstIndex(of: ":") else { return nil }
+            let name = rest[..<colon].trimmingCharacters(in: .whitespaces)
+            return seen.insert(name).inserted ? name : nil
+        }
+    }
+
     /// "[mm:ss] Speaker: text", merging consecutive lines from the same speaker.
     static func format(_ segments: [Segment]) -> String {
         var lines: [(start: TimeInterval, speaker: String, text: String)] = []
