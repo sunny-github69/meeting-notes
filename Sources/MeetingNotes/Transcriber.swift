@@ -11,18 +11,54 @@ enum Transcriber {
     /// Biases Whisper towards meeting vocabulary; accent-neutral so it suits any speaker. Only used for
     /// English: in auto-detect mode an English prompt would nudge Whisper into English.
     private static let hint = "A work meeting in English with speakers of different accents, discussing product, engineering and business topics."
-    private typealias Raw = (start: Double, end: Double, text: String)
+    private struct Raw: Codable {
+        let start: Double
+        let end: Double
+        let text: String
+    }
 
-    static func transcribe(tracks: [Track], engine: STTEngine, language: TranscriptionLanguage) async throws -> [Segment] {
+    /// Reports (part, of parts, overall fraction 0…1). Parts are weighted by their audio length.
+    typealias Progress = @Sendable (_ part: Int, _ parts: Int, _ fraction: Double) -> Void
+
+    static func transcribe(tracks: [Track], engine: STTEngine, language: TranscriptionLanguage,
+                           progress: @escaping Progress) async throws -> [Segment] {
+        let parts = tracks.flatMap { track in track.chunks.map { (speaker: track.speaker, chunk: $0) } }
+        let weights = parts.map { part in
+            Double((try? part.chunk.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) + 1
+        }
+        let total = weights.reduce(0, +)
+        let count = parts.count
+        var done = 0.0
         var segments: [Segment] = []
-        for track in tracks {
-            for chunk in track.chunks {
-                let raw = engine == .local ? try await local(chunk.url, language: language)
-                                           : try await openAI(chunk.url, language: language)
-                segments += raw.map { Segment(start: chunk.offset + $0.start, end: chunk.offset + $0.end, speaker: track.speaker, text: $0.text) }
+        for (index, part) in parts.enumerated() {
+            let base = done
+            let weight = weights[index]
+            let report: @Sendable (Double) -> Void = { progress(index + 1, count, (base + weight * $0) / total) }
+            report(0)
+            let raw = try await cached(part.chunk.url) {
+                engine == .local ? try await local(part.chunk.url, language: language, progress: report)
+                                 : try await openAI(part.chunk.url, language: language)
+            }
+            done += weight
+            report(1)
+            segments += raw.map {
+                Segment(start: part.chunk.offset + $0.start, end: part.chunk.offset + $0.end,
+                        speaker: part.speaker, text: $0.text)
             }
         }
         return segments.filter { !$0.text.isEmpty }.sorted { $0.start < $1.start }
+    }
+
+    /// Each part's result is saved next to its WAV, so a retry after a failure resumes where it stopped
+    /// instead of transcribing the whole meeting again.
+    private static func cached(_ wav: URL, _ transcribe: () async throws -> [Raw]) async throws -> [Raw] {
+        let cache = wav.deletingPathExtension().appendingPathExtension("segments.json")
+        if let data = try? Data(contentsOf: cache), let raw = try? JSONDecoder().decode([Raw].self, from: data) {
+            return raw
+        }
+        let raw = try await transcribe()
+        try? JSONEncoder().encode(raw).write(to: cache)
+        return raw
     }
 
     /// Speaker names in order of first appearance, read back from a formatted transcript.
@@ -83,11 +119,12 @@ enum Transcriber {
             guard (seg["no_speech_prob"] as? Double ?? 0) < 0.6,
                   let start = seg["start"] as? Double, let end = seg["end"] as? Double,
                   let text = seg["text"] as? String else { return nil }
-            return (start, end, text.trimmingCharacters(in: .whitespaces))
+            return Raw(start: start, end: end, text: text.trimmingCharacters(in: .whitespaces))
         }
     }
 
-    private static func local(_ wav: URL, language: TranscriptionLanguage) async throws -> [Raw] {
+    private static func local(_ wav: URL, language: TranscriptionLanguage,
+                              progress: @escaping @Sendable (Double) -> Void) async throws -> [Raw] {
         // Apps launched from Finder don't get the shell's PATH, so look in Homebrew's prefixes directly.
         // Older whisper-cpp formulae named the binary "whisper-cpp" instead of "whisper-cli".
         let candidates = ["/opt/homebrew/bin", "/usr/local/bin"].flatMap { ["\($0)/whisper-cli", "\($0)/whisper-cpp"] }
@@ -101,12 +138,21 @@ enum Transcriber {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: bin)
         process.arguments = ["-m", Prefs.whisperModel, "-f", wav.path, "-l", language.whisperCode,
-                             "-oj", "-of", outBase, "-np"]
+                             "-oj", "-of", outBase, "-np", "-pp"]
             + (language == .english ? ["--prompt", hint] : [])
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        // With -pp whisper-cli prints "progress = 45%" lines to stderr; read them live for the progress bar.
+        let errors = Pipe()
+        process.standardError = errors
+        errors.fileHandleForReading.readabilityHandler = { handle in
+            let text = String(decoding: handle.availableData, as: UTF8.self)
+            let percents = text.components(separatedBy: "progress =").dropFirst()
+                .compactMap { Int($0.trimmingCharacters(in: .whitespaces).prefix(while: \.isNumber)) }
+            if let percent = percents.last { progress(Double(min(percent, 100)) / 100) }
+        }
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             process.terminationHandler = { p in
+                errors.fileHandleForReading.readabilityHandler = nil
                 if p.terminationStatus == 0 {
                     done.resume()
                 } else {
@@ -126,7 +172,8 @@ enum Transcriber {
         }
         let data = try Data(contentsOf: URL(fileURLWithPath: outBase + ".json"))
         return try JSONDecoder().decode(Output.self, from: data).transcription.map {
-            (Double($0.offsets.from) / 1000, Double($0.offsets.to) / 1000, $0.text.trimmingCharacters(in: .whitespaces))
+            Raw(start: Double($0.offsets.from) / 1000, end: Double($0.offsets.to) / 1000,
+                text: $0.text.trimmingCharacters(in: .whitespaces))
         }
     }
 }

@@ -19,7 +19,7 @@ final class SpeakerDetector {
         case appHidden
     }
 
-    struct Sample {
+    struct Sample: Codable {
         let time: TimeInterval  // seconds from the start of the meeting
         let name: String
     }

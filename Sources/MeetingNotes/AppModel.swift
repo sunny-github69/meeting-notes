@@ -3,19 +3,6 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
-    enum State: Equatable {
-        case idle
-        case recording(Date)
-        case processing(Step)
-        case done(Meeting)
-        case failed(String)
-    }
-
-    enum Step: Equatable {
-        case transcribing
-        case writingNotes(model: String)
-    }
-
     /// A saved meeting: a folder named "yyyy-MM-dd HHmm" or "yyyy-MM-dd HHmm · Title".
     struct Meeting: Identifiable, Equatable {
         let id: URL  // the folder
@@ -30,17 +17,43 @@ final class AppModel: ObservableObject {
         var displayTitle: String { title ?? date.formatted(date: .abbreviated, time: .shortened) }
     }
 
-    @Published private(set) var state: State = .idle
+    /// A meeting waiting for, or going through, transcription and notes.
+    struct Job: Identifiable, Equatable {
+        enum Phase: Equatable {
+            case queued
+            case transcribing(part: Int, of: Int)
+            case writingNotes(model: String)
+            case failed(String)
+        }
+
+        let id: URL  // the meeting folder
+        let date: Date
+        var regenerate = false  // only rewrite notes.md of an existing meeting
+        var phase: Phase = .queued
+        var progress = 0.0  // 0…1
+
+        var isActive: Bool {
+            switch phase {
+            case .transcribing, .writingNotes: return true
+            case .queued, .failed: return false
+            }
+        }
+    }
+
+    @Published private(set) var recordingSince: Date?
+    @Published private(set) var startError: String?
+    @Published private(set) var jobs: [Job] = []
+    @Published private(set) var lastMeeting: Meeting?  // shown in the "Notes ready" card
     @Published private(set) var speakerStatus: SpeakerDetector.Status?
     @Published private(set) var meetingApp: MeetingApp?
     @Published private(set) var recent: [Meeting] = []
     @Published private(set) var models: [String] = []
     @Published private(set) var modelsLoading = false
     @Published private(set) var modelsError: String?
-    @Published private(set) var notesError: String?  // a failed "Regenerate"; the old notes stay
 
     private let recorder = Recorder()
-    private var session: (dir: URL, recording: Recording?)?
+    private var recordingDir: URL?
+    private var worker: Task<Void, Never>?
     private var autoStarted = false
     private var ignoreCurrentMeeting = false
     private var missedPolls = 0
@@ -52,19 +65,14 @@ final class AppModel: ObservableObject {
         return formatter
     }()
 
-    var isRecording: Bool { if case .recording = state { return true } else { return false } }
-    var canRetry: Bool { if case .failed = state, session?.recording != nil { return true } else { return false } }
-    private var isBusy: Bool {
-        switch state {
-        case .recording, .processing: return true
-        default: return false
-        }
-    }
+    var isRecording: Bool { recordingSince != nil }
+    func isProcessing(_ meeting: Meeting) -> Bool { jobs.contains { $0.id == meeting.id } }
 
     init() {
         Prefs.registerDefaults()
         Notifier.shared.setUp()
         refreshRecent()
+        resumePendingJobs()
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.pollMeetings() }
         }
@@ -77,8 +85,9 @@ final class AppModel: ObservableObject {
     // MARK: Recording
 
     /// Starts recording. `app` is the meeting app auto-record detected; a manual start works it out here.
+    /// Earlier meetings may still be processing in the background; that doesn't block a new recording.
     func start(auto: Bool = false, app: MeetingApp? = nil) async {
-        guard !isBusy else { return }
+        guard recordingDir == nil else { return }
         let dir = Self.notesRoot.appendingPathComponent(Self.folderFormat.string(from: Date()))
         do {
             let app = await Self.detected(app) { MeetingDetector.currentApp() }
@@ -86,65 +95,182 @@ final class AppModel: ObservableObject {
             try await recorder.start(into: dir, app: app, detectSpeakers: Prefs.detectSpeakers) { [weak self] status in
                 self?.speakerStatus = status
             }
-            session = (dir, nil)
-            notesError = nil
+            recordingDir = dir
+            recordingSince = Date()
+            startError = nil
             meetingApp = app
             autoStarted = auto
             missedPolls = 0
-            state = .recording(Date())
             if auto {
                 Notifier.shared.post("Recording \(app?.title ?? "meeting")", "Notes will be written when the meeting ends.")
             }
         } catch {
             ignoreCurrentMeeting = true
-            state = .failed(error.localizedDescription)
+            startError = error.localizedDescription
         }
     }
 
+    /// Stops recording and hands the meeting to the processing queue.
     func stop() async {
-        guard let dir = session?.dir, isRecording else { return }
+        guard let dir = recordingDir else { return }
         ignoreCurrentMeeting = true
-        session = (dir, await recorder.stop())
+        let recording = await recorder.stop()
+        recordingDir = nil
+        recordingSince = nil
         speakerStatus = nil
         meetingApp = nil
-        await process()
+        do {
+            try recording.save(in: dir)
+            enqueue(dir)
+        } catch {
+            Notifier.shared.post("Couldn't save the recording", error.localizedDescription)
+        }
     }
 
-    func retry() async { await process() }
+    // MARK: Processing queue
 
-    private func process() async {
-        guard let session, let recording = session.recording else { return }
-        do {
-            state = .processing(.transcribing)
-            let segments = try await Transcriber.transcribe(tracks: recording.tracks, engine: Prefs.sttEngine,
-                                                              language: Prefs.transcriptionLanguage)
-                .map { name($0, using: recording.speakers) }
-            guard !segments.isEmpty else { throw AppError("No speech was detected.") }
-            let transcript = Transcriber.format(segments)
-            try transcript.write(to: session.dir.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
-            let context = NotesContext(app: recording.app?.rawValue, participants: recording.participants)
-            try? JSONEncoder().encode(context).write(to: session.dir.appendingPathComponent(NotesContext.fileName))
-            var title: String?
+    /// Writes notes.md again from the saved transcript with the currently selected model, e.g. when a small
+    /// local model gave a weak result. A name the user chose is kept; on failure the old notes stay.
+    func regenerateNotes(_ meeting: Meeting) {
+        enqueue(meeting.id, regenerate: true)
+    }
 
-            if Prefs.aiNotesEnabled {
-                let notes = try await writeNotes(transcript: transcript, context: context, in: session.dir)
-                title = LLM.title(fromNotes: notes)
+    func retry(_ job: Job) {
+        update(job.id) { $0.phase = .queued; $0.progress = 0 }
+        runQueue()
+    }
+
+    /// Removes a failed job. A new recording is moved to the Trash with its audio; a failed regeneration
+    /// just goes away and the meeting keeps its previous notes.
+    func discard(_ job: Job) {
+        guard !job.isActive else { return }
+        jobs.removeAll { $0.id == job.id }
+        if !job.regenerate { try? FileManager.default.trashItem(at: job.id, resultingItemURL: nil) }
+        refreshRecent()
+    }
+
+    private func enqueue(_ dir: URL, regenerate: Bool = false) {
+        guard !jobs.contains(where: { $0.id == dir }),
+              let date = Self.folderFormat.date(from: String(dir.lastPathComponent.prefix(15))) else { return }
+        jobs.append(Job(id: dir, date: date, regenerate: regenerate))
+        runQueue()
+    }
+
+    /// Meetings recorded before the app quit (or crashed) are picked up again on launch.
+    private func resumePendingJobs() {
+        let dirs = (try? FileManager.default.contentsOfDirectory(
+            at: Self.notesRoot, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
+        dirs.filter(Recording.isPending(in:)).sorted { $0.lastPathComponent < $1.lastPathComponent }.forEach { enqueue($0) }
+    }
+
+    /// Processes queued meetings one at a time: transcription keeps the CPU/GPU busy, so running two at
+    /// once would only slow both down. Recording is light and carries on alongside.
+    private func runQueue() {
+        guard worker == nil else { return }
+        worker = Task { [self] in
+            while let job = jobs.first(where: { $0.phase == .queued }) {
+                await process(job)
             }
+            worker = nil
+        }
+    }
 
-            // Raw audio is only kept when something failed, so it can be retried.
-            recording.tracks.flatMap(\.chunks).forEach { try? FileManager.default.removeItem(at: $0.url) }
-            self.session = nil
-            // Saved already under the date; the AI's title is applied on top and can be changed later.
-            let saved = Self.meeting(at: session.dir)
-            let meeting = title.flatMap { title in saved.flatMap { try? move($0, to: title) } } ?? saved
-            guard let meeting else { throw AppError("Couldn't read the saved meeting.") }
-            state = .done(meeting)
+    private func process(_ job: Job) async {
+        update(job.id) { $0.phase = .transcribing(part: 0, of: 0); $0.progress = 0 }
+        do {
+            let meeting = try await run(job)
+            jobs.removeAll { $0.id == job.id }
+            lastMeeting = meeting
             refreshRecent()
             Notifier.shared.post("Meeting notes ready", "\(meeting.displayTitle): click to open.", open: meeting.file)
         } catch {
-            state = .failed("\(error.localizedDescription) Audio kept in \(session.dir.lastPathComponent).")
+            update(job.id) { $0.phase = .failed(error.localizedDescription) }
             Notifier.shared.post("Meeting notes failed", error.localizedDescription)
         }
+    }
+
+    /// Transcribes (unless a finished transcript is already saved), writes notes, cleans up the audio and
+    /// applies the AI's title. Every step leaves its result on disk, so a retry resumes where it failed.
+    private func run(_ job: Job) async throws -> Meeting {
+        let dir = job.id
+        let transcriptFile = dir.appendingPathComponent("transcript.md")
+        let writesNotes = job.regenerate || Prefs.aiNotesEnabled
+        let transcriptShare = job.regenerate ? 0 : writesNotes ? 0.8 : 1.0  // of the progress bar
+
+        let transcript: String
+        if let saved = try? String(contentsOf: transcriptFile, encoding: .utf8) {
+            transcript = saved
+        } else {
+            guard let recording = Recording.load(from: dir) else {
+                throw AppError("The recording for this meeting is missing.")
+            }
+            let segments = try await Transcriber.transcribe(
+                tracks: recording.tracks, engine: Prefs.sttEngine, language: Prefs.transcriptionLanguage
+            ) { [weak self] part, parts, fraction in
+                Task { @MainActor in
+                    self?.update(dir) { $0.phase = .transcribing(part: part, of: parts); $0.progress = fraction * transcriptShare }
+                }
+            }
+            .map { name($0, using: recording.speakers) }
+            guard !segments.isEmpty else { throw AppError("No speech was detected.") }
+            transcript = Transcriber.format(segments)
+            try transcript.write(to: transcriptFile, atomically: true, encoding: .utf8)
+            let context = NotesContext(app: recording.app?.rawValue, participants: recording.participants)
+            try? JSONEncoder().encode(context).write(to: dir.appendingPathComponent(NotesContext.fileName))
+        }
+
+        var title: String?
+        if writesNotes {
+            let notes = try await writeNotes(transcript: transcript, in: dir, progressFrom: transcriptShare)
+            title = LLM.title(fromNotes: notes)
+        }
+        Recording.discardAudio(in: dir)
+
+        // Saved under the date already; the AI's title is applied unless the meeting has a name.
+        guard let saved = Self.meeting(at: dir) else { throw AppError("Couldn't read the saved meeting.") }
+        if saved.title == nil, let title, let renamed = try? move(saved, to: title) { return renamed }
+        return saved
+    }
+
+    /// Asks the selected AI for notes and saves them as notes.md, tagged with the model that wrote them.
+    private func writeNotes(transcript: String, in dir: URL, progressFrom start: Double) async throws -> String {
+        let provider = Prefs.provider
+        let model = Prefs.model(for: provider)
+        update(dir) { $0.phase = .writingNotes(model: model); $0.progress = start }
+
+        // The AI answers in one piece, so the bar eases towards 97% at a pace set by the transcript's
+        // length (local models are slower), then jumps to done.
+        let expected = provider == .ollama ? 40 + Double(transcript.count) / 400 : 10 + Double(transcript.count) / 4000
+        let ticker = Task { [weak self] in
+            let began = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                let eased = 1 - exp(-Date().timeIntervalSince(began) / expected)
+                self?.update(dir) { $0.progress = start + (0.97 - start) * eased }
+            }
+        }
+        defer { ticker.cancel() }
+
+        let context = (try? Data(contentsOf: dir.appendingPathComponent(NotesContext.fileName)))
+            .flatMap { try? JSONDecoder().decode(NotesContext.self, from: $0) } ?? NotesContext(app: nil, participants: [])
+        let notes = try await LLM.complete(
+            provider: provider, model: model,
+            user: LLM.userMessage(transcript: transcript, app: context.app.flatMap(MeetingApp.init(rawValue:)),
+                                  recordedBy: Prefs.yourName, speakers: Transcriber.speakers(in: transcript),
+                                  namesOnScreen: context.participants))
+        let tagged = notes + "\n\n<!-- notes-model: \(model) (\(provider.title)) -->\n"
+        try tagged.write(to: dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
+        return notes
+    }
+
+    /// Changes a job in place; progress updates smaller than 0.5% are skipped to avoid needless redraws.
+    private func update(_ id: URL, _ change: (inout Job) -> Void) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        var job = jobs[index]
+        change(&job)
+        guard job != jobs[index] else { return }
+        if job.phase == jobs[index].phase, abs(job.progress - jobs[index].progress) < 0.005, job.progress < 1 { return }
+        jobs[index] = job
     }
 
     /// Replaces the track label with your name, or with whoever the meeting app highlighted.
@@ -184,43 +310,7 @@ final class AppModel: ObservableObject {
 
     // MARK: Menu & settings helpers
 
-    /// Writes notes.md again from the saved transcript with the currently selected model, e.g. when a
-    /// small local model gave a weak result. A name the user chose is kept; on failure the old notes stay.
-    func regenerateNotes(_ meeting: Meeting) async {
-        guard !isBusy else { return }
-        guard let transcript = try? String(contentsOf: meeting.id.appendingPathComponent("transcript.md"), encoding: .utf8)
-        else { notesError = "The transcript for this meeting is missing."; return }
-        let context = (try? Data(contentsOf: meeting.id.appendingPathComponent(NotesContext.fileName)))
-            .flatMap { try? JSONDecoder().decode(NotesContext.self, from: $0) } ?? NotesContext(app: nil, participants: [])
-        notesError = nil
-        do {
-            let notes = try await writeNotes(transcript: transcript, context: context, in: meeting.id)
-            var updated = Self.meeting(at: meeting.id) ?? meeting
-            if meeting.title == nil, let title = LLM.title(fromNotes: notes), let renamed = try? move(updated, to: title) {
-                updated = renamed
-            }
-            state = .done(updated)
-            refreshRecent()
-        } catch {
-            notesError = error.localizedDescription
-            state = .done(meeting)
-        }
-    }
-
-    /// Asks the selected AI for notes and saves them as notes.md, tagged with the model that wrote them.
-    private func writeNotes(transcript: String, context: NotesContext, in dir: URL) async throws -> String {
-        let provider = Prefs.provider
-        let model = Prefs.model(for: provider)
-        state = .processing(.writingNotes(model: model))
-        let notes = try await LLM.complete(
-            provider: provider, model: model,
-            user: LLM.userMessage(transcript: transcript, app: context.app.flatMap(MeetingApp.init(rawValue:)),
-                                  recordedBy: Prefs.yourName, speakers: Transcriber.speakers(in: transcript),
-                                  namesOnScreen: context.participants))
-        let tagged = notes + "\n\n<!-- notes-model: \(model) (\(provider.title)) -->\n"
-        try tagged.write(to: dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
-        return notes
-    }
+    func dismissLastMeeting() { lastMeeting = nil }
 
     func refreshRecent() {
         let dirs = (try? FileManager.default.contentsOfDirectory(
@@ -230,14 +320,15 @@ final class AppModel: ObservableObject {
 
     /// Renames a saved meeting. An empty title goes back to the plain date name.
     func rename(_ meeting: Meeting, to title: String) {
-        guard let renamed = try? move(meeting, to: title) else { return }
-        if case .done(let current) = state, current.id == meeting.id { state = .done(renamed) }
+        guard !isProcessing(meeting), let renamed = try? move(meeting, to: title) else { return }
+        if lastMeeting?.id == meeting.id { lastMeeting = renamed }
         refreshRecent()
     }
 
     func moveToTrash(_ meeting: Meeting) {
+        guard !isProcessing(meeting) else { return }
         try? FileManager.default.trashItem(at: meeting.id, resultingItemURL: nil)
-        if case .done(let current) = state, current.id == meeting.id { state = .idle }
+        if lastMeeting?.id == meeting.id { lastMeeting = nil }
         refreshRecent()
     }
 

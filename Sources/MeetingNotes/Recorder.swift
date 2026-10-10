@@ -1,7 +1,7 @@
 import AVFoundation
 import ScreenCaptureKit
 
-struct Track {
+struct Track: Codable {
     static let you = "You"
     static let others = "Others"
 
@@ -11,7 +11,7 @@ struct Track {
 
 /// Writes mono 16 kHz PCM into 10-minute WAV chunks, so each stays under Whisper's 25 MB upload limit.
 final class ChunkedWavWriter {
-    struct Chunk {
+    struct Chunk: Codable {
         let url: URL
         let offset: TimeInterval  // seconds from the start of the meeting
     }
@@ -104,11 +104,41 @@ private extension CMSampleBuffer {
     }
 }
 
-struct Recording {
+/// Everything captured for one meeting. Saved as recording.json when recording stops, so the meeting can
+/// wait in the processing queue, survive an app restart, and be retried after a failure.
+struct Recording: Codable {
+    static let fileName = "recording.json"
+
     let app: MeetingApp?
     let tracks: [Track]
     let speakers: [SpeakerDetector.Sample]
     let participants: [String]  // names seen on screen
+
+    func save(in dir: URL) throws {
+        try JSONEncoder().encode(self).write(to: dir.appendingPathComponent(Self.fileName))
+    }
+
+    static func load(from dir: URL) -> Recording? {
+        (try? Data(contentsOf: dir.appendingPathComponent(fileName)))
+            .flatMap { try? JSONDecoder().decode(Recording.self, from: $0) }
+    }
+
+    static func isPending(in dir: URL) -> Bool {
+        FileManager.default.fileExists(atPath: dir.appendingPathComponent(fileName).path)
+    }
+
+    /// Deletes the audio and intermediate files once the notes are saved. Keeps transcript.md, notes.md
+    /// and meeting.json.
+    static func discardAudio(in dir: URL) {
+        let fm = FileManager.default
+        for chunk in load(from: dir)?.tracks.flatMap(\.chunks) ?? [] {
+            let base = chunk.url.deletingPathExtension()
+            for file in [chunk.url, base.appendingPathExtension("json"), base.appendingPathExtension("segments.json")] {
+                try? fm.removeItem(at: file)
+            }
+        }
+        try? fm.removeItem(at: dir.appendingPathComponent(fileName))
+    }
 }
 
 /// Captures the meeting's audio (the other participants) through ScreenCaptureKit and your microphone

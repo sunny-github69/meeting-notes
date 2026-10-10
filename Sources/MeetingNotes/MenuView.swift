@@ -13,7 +13,12 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             statusCard
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.state)
+            if !model.jobs.isEmpty {
+                QueueCard(jobs: model.jobs).transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            if let meeting = model.lastMeeting, !model.isRecording {
+                DoneCard(meeting: meeting).card().transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
             VStack(spacing: 10) {
                 SwitchRow(title: "Auto-record meetings", icon: "video.fill", tint: .blue, isOn: $autoDetectZoom)
                 SwitchRow(title: "Identify speakers", icon: "person.2.wave.2.fill", tint: .teal, isOn: $detectSpeakers)
@@ -37,6 +42,9 @@ struct MenuView: View {
         }
         .padding(16)
         .frame(width: 340)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.jobs)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.lastMeeting)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.recordingSince)
         .onAppear { model.refreshRecent() }
     }
 
@@ -65,26 +73,24 @@ struct MenuView: View {
     }
 
     private var subtitle: String {
-        switch model.state {
-        case .idle: return autoDetectZoom ? "Waiting for Zoom, Meet or Teams" : "Ready"
-        case .recording: return model.meetingApp.map { "Recording \($0.title) locally" } ?? "Recording locally"
-        case .processing: return "Working on your notes…"
-        case .done: return "Notes saved"
-        case .failed: return "Something went wrong"
+        if model.isRecording {
+            return model.meetingApp.map { "Recording \($0.title) locally" } ?? "Recording locally"
         }
+        if let active = model.jobs.first(where: \.isActive) {
+            return "Working on your notes · \(Int(active.progress * 100))%"
+        }
+        if model.jobs.contains(where: { if case .failed = $0.phase { return true } else { return false } }) {
+            return "A meeting needs attention"
+        }
+        if model.lastMeeting != nil { return "Notes saved" }
+        return autoDetectZoom ? "Waiting for Zoom, Meet or Teams" : "Ready"
     }
 
-    @ViewBuilder private var statusCard: some View {
+    /// Start, or the live recording. Processing runs separately (see the queue card), so a new meeting can
+    /// be recorded while earlier ones are still being transcribed.
+    private var statusCard: some View {
         Group {
-            switch model.state {
-            case .idle:
-                VStack(alignment: .leading, spacing: 8) {
-                    wideButton("Start recording", icon: "record.circle.fill") { await model.start() }
-                    Text(autoDetectZoom ? "Recording starts by itself when you join a call."
-                                        : "Join your meeting, then press Start.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            case .recording(let since):
+            if let since = model.recordingSince {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
                         PulsingDot()
@@ -96,28 +102,22 @@ struct MenuView: View {
                     if detectSpeakers { speakerLine.font(.callout) }
                     wideButton("Stop & write notes", icon: "stop.fill", tint: .red) { await model.stop() }
                 }
-            case .processing(let step):
-                ProcessingSteps(step: step, writesNotes: aiNotesEnabled || step != .transcribing)
-            case .done(let meeting):
-                DoneCard(meeting: meeting)
-            case .failed(let message):
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Something went wrong", systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
-                    Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        if model.canRetry {
-                            Button { Task { await model.retry() } } label: { Label("Retry", systemImage: "arrow.clockwise") }
-                                .buttonStyle(.borderedProminent)
-                        }
-                        Button("New recording") { Task { await model.start() } }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    wideButton("Start recording", icon: "record.circle.fill") { await model.start() }
+                    if let error = model.startError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(autoDetectZoom ? "Recording starts by itself when you join a call."
+                                            : "Join your meeting, then press Start.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
-        .transition(.opacity.combined(with: .scale(scale: 0.98)))
     }
 
     @ViewBuilder private var speakerLine: some View {
@@ -197,6 +197,8 @@ struct DoneCard: View {
             Text(meeting.hasNotes ? "Notes ready" : "Transcript ready").font(.subheadline.weight(.semibold))
             Spacer()
             if let app = meeting.app { Badge(text: app.title, icon: "video.fill") }
+            Button { model.dismissLastMeeting() } label: { Image(systemName: "xmark").font(.caption.weight(.bold)) }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Hide")
         }
     }
 
@@ -209,6 +211,7 @@ struct DoneCard: View {
                 .focused($nameFocused)
                 .onSubmit(save)
                 .onExitCommand(perform: cancel)
+                .disabled(model.isProcessing(meeting))
             if edited {
                 Button(action: save) { Image(systemName: "checkmark.circle.fill").font(.title3) }
                     .buttonStyle(.borderless).foregroundStyle(.green).help("Save name (Return)")
@@ -306,17 +309,17 @@ struct DoneCard: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
-                Button { Task { await model.regenerateNotes(meeting) } } label: {
+                Button { model.regenerateNotes(meeting) } label: {
                     Label(meeting.hasNotes ? "Regenerate" : "Write notes", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
-                .disabled(selectedModel.isEmpty)
+                .disabled(selectedModel.isEmpty || model.isProcessing(meeting))
                 .help("Write the notes again with the selected model")
             }
-            Text(model.notesError.map { "Couldn't regenerate: \($0)" }
-                 ?? "Not happy with the notes? Pick another model and regenerate.")
+            Text(model.isProcessing(meeting) ? "Regenerating… progress is shown above."
+                                             : "Not happy with the notes? Pick another model and regenerate.")
                 .font(.caption)
-                .foregroundStyle(model.notesError == nil ? Color.secondary : Color.red)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -437,37 +440,149 @@ struct MeetingRow: View {
 
 // MARK: - Small pieces
 
-struct ProcessingSteps: View {
-    let step: AppModel.Step
-    let writesNotes: Bool
-
-    private enum Phase { case pending, active, done }
+/// Meetings being transcribed and summarised, one at a time, with failed ones offering Retry.
+struct QueueCard: View {
+    let jobs: [AppModel.Job]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            row("Transcribing audio", step == .transcribing ? .active : .done)
-            if writesNotes { row(notesTitle, step == .transcribing ? .pending : .active) }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Processing").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                let waiting = jobs.filter { $0.phase == .queued }.count
+                if waiting > 0 { Badge(text: "\(waiting) in queue", icon: "clock") }
+            }
+            ForEach(jobs) { job in
+                switch job.phase {
+                case .transcribing, .writingNotes: ActiveJobRow(job: job)
+                case .queued: QueuedJobRow(job: job)
+                case .failed(let message): FailedJobRow(job: job, message: message)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+}
+
+private extension AppModel.Job {
+    var title: String { date.formatted(date: .abbreviated, time: .shortened) }
+}
+
+struct ActiveJobRow: View {
+    let job: AppModel.Job
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ProgressRing(progress: job.progress)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(job.regenerate ? "Regenerating notes" : job.title)
+                    .font(.subheadline.weight(.semibold)).lineLimit(1)
+                step("Transcribing", detail: transcribeDetail, state: transcribeState)
+                step(notesLabel, detail: nil, state: notesState)
+            }
         }
     }
 
-    private var notesTitle: String {
-        if case .writingNotes(let model) = step { return "Writing notes with \(model)" }
+    private enum StepState { case pending, active, done }
+
+    private var transcribeState: StepState {
+        if job.regenerate { return .done }
+        if case .transcribing = job.phase { return .active }
+        return .done
+    }
+
+    private var notesState: StepState {
+        if case .writingNotes = job.phase { return .active }
+        return .pending
+    }
+
+    private var transcribeDetail: String? {
+        guard case .transcribing(let part, let parts) = job.phase else { return nil }
+        return parts == 0 ? "preparing" : "part \(part) of \(parts)"
+    }
+
+    private var notesLabel: String {
+        if case .writingNotes(let model) = job.phase { return "Writing notes · \(model)" }
         return "Writing notes"
     }
 
-    private func row(_ title: String, _ phase: Phase) -> some View {
-        HStack(spacing: 8) {
+    private func step(_ title: String, detail: String?, state: StepState) -> some View {
+        HStack(spacing: 6) {
             Group {
-                switch phase {
+                switch state {
                 case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                case .active: ProgressView().controlSize(.small)
+                case .active: Image(systemName: "circle.dotted").foregroundStyle(Color.accentColor)
                 case .pending: Image(systemName: "circle").foregroundStyle(.tertiary)
                 }
             }
-            .frame(width: 16, height: 16)
-            Text(title).lineLimit(1).foregroundStyle(phase == .pending ? .secondary : .primary)
+            .font(.caption)
+            Text(detail.map { "\(title) · \($0)" } ?? title)
+                .font(.caption)
+                .foregroundStyle(state == .pending ? .secondary : .primary)
+                .lineLimit(1)
+        }
+    }
+}
+
+struct QueuedJobRow: View {
+    let job: AppModel.Job
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock").foregroundStyle(.secondary).frame(width: 18)
+            Text(job.regenerate ? "Regenerate notes · \(job.title)" : job.title).lineLimit(1)
+            Spacer()
+            Text("Waiting").font(.caption).foregroundStyle(.secondary)
         }
         .font(.callout)
+    }
+}
+
+struct FailedJobRow: View {
+    let job: AppModel.Job
+    let message: String
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).frame(width: 18)
+                Text(job.regenerate ? "Couldn't regenerate notes" : "Couldn't finish \(job.title)")
+                    .font(.callout.weight(.medium)).lineLimit(1)
+            }
+            Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button { model.retry(job) } label: { Label("Retry", systemImage: "arrow.clockwise") }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                Button(job.regenerate ? "Dismiss" : "Discard") { model.discard(job) }
+                    .controlSize(.small)
+                    .help(job.regenerate ? "Keep the previous notes" : "Move this recording to the Trash")
+            }
+            .padding(.leading, 26)
+        }
+    }
+}
+
+/// Circular gradient progress with the percentage in the middle.
+struct ProgressRing: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.08), lineWidth: 6)
+            Circle()
+                .trim(from: 0, to: max(progress, 0.02))
+                .stroke(AngularGradient(colors: [.blue, .purple, .pink, .blue], center: .center),
+                        style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: .purple.opacity(0.35), radius: 4)
+            Text("\(Int((progress * 100).rounded()))%")
+                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+        }
+        .frame(width: 58, height: 58)
+        .animation(.easeOut(duration: 0.4), value: progress)
     }
 }
 

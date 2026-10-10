@@ -59,6 +59,14 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
   `2026-10-10 1111 · Sprint planning`. After saving you can rename it right in the menu (✓ to save,
   ✕/Esc to keep the saved name), and every recent meeting can be renamed, copied, shown in Finder or
   moved to the Trash (hover or right-click).
+- **Never miss the next meeting:** when you stop, the meeting joins a background queue and a new
+  recording can start straight away (auto-record too). The queue is saved to disk, so it carries on
+  after a restart.
+- **Live progress:** a gradient ring with the percentage, plus "Transcribing · part 3 of 6" and
+  "Writing notes · model" steps.
+- **Resilient:** rate limits, overloaded servers and dropped connections are retried automatically
+  (2 s, 8 s, 30 s, honouring `Retry-After`); a bad key or retired model fails at once with a clear
+  message. **Retry** resumes where it stopped: finished transcript parts aren't transcribed again.
 - **Hands-free:** optional auto-record when a Zoom, Meet or Teams call starts (and stop when it ends),
   launch at login, and a macOS notification when the notes are ready.
 
@@ -150,6 +158,26 @@ James asked whether Thursday is still realistic ...
    notes as Markdown.
 7. **Clean up.** `transcript.md` and `notes.md` are saved, the WAV files are deleted, and you get a
    notification. If any step fails the audio is kept so **Retry** can run steps 4–7 again.
+
+### Queue, retries and long meetings
+
+- **Queue.** Pressing Stop writes `recording.json` (the audio parts, speaker timeline and names seen
+  on screen) and adds the meeting to a queue. One meeting is processed at a time, because Whisper keeps
+  the CPU/GPU busy and two at once would only slow both down. Recording is light and runs alongside,
+  so the next meeting is never blocked. Pending meetings are picked up again when the app starts.
+- **Resume, not restart.** Each 10-minute part's transcript is cached next to its audio
+  (`*.segments.json`), and `transcript.md` is written before the AI is called. A retry skips everything
+  already done; if only the notes failed, only the notes are redone.
+- **Automatic retries.** Temporary API errors (HTTP 408/425/429/5xx/529, lost connection) are retried
+  three times with growing waits, using the server's `Retry-After` when given. Permanent errors (wrong
+  key, unknown or retired model) are shown straight away with **Retry** and **Discard** buttons.
+- **How long can a meeting be?** Recording has no limit (about 230 MB of temporary audio per hour).
+  An hour of talk is roughly 8–10k words (~12–15k tokens), which cloud models such as Gemini, Claude and
+  GPT read in one go; their context windows hold many hours. Very long meetings can hit the model's
+  *output* limit for the detailed notes, and small local models get weaker on long transcripts.
+- **Progress %.** Transcription progress is weighted by each part's length and, for local whisper.cpp,
+  read live from its `progress = NN%` output. The AI returns its notes in one piece, so that last stretch
+  eases towards 97% at a pace based on the transcript's length and completes when the notes arrive.
 
 ### Why two different AI models?
 
@@ -243,10 +271,10 @@ mac-app/
     ├── docs/                    Screenshots and the icon used in this README
     └── Sources/MeetingNotes/
         ├── MeetingNotesApp.swift   App entry point and the Settings window (General, AI notes, Transcription)
-        ├── MenuView.swift          Menu-bar popover: recording card, progress steps, rename/preview card, recent list
+        ├── MenuView.swift          Menu-bar popover: recording card, queue with progress ring, notes card, recent list
         ├── MeetingApp.swift        Zoom / Meet / Teams: bundle ids, highlight colours, call detection
         │                           (mic usage per app, window titles)
-        ├── AppModel.swift          State (idle → recording → processing → done/failed), auto-record,
+        ├── AppModel.swift          Recording, the processing queue (progress, retry, resume), auto-record,
         │                           runs the pipeline, recent meetings
         ├── Recorder.swift          ScreenCaptureKit (meeting audio + frames), microphone, 16 kHz WAV chunk writer
         ├── SpeakerDetector.swift   Highlight detection, Vision OCR, window-visible check, speaker timeline,

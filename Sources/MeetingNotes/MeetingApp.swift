@@ -3,7 +3,7 @@ import CoreAudio
 import CoreGraphics
 
 /// The meeting apps the recorder understands.
-enum MeetingApp: String, CaseIterable {
+enum MeetingApp: String, CaseIterable, Codable {
     case zoom, meet, teams
 
     var title: String {

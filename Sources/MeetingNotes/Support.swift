@@ -123,20 +123,54 @@ enum Keychain {
 }
 
 enum HTTP {
+    /// An API call that failed. Temporary failures (rate limits, overloaded or restarting servers, a dropped
+    /// connection) are retried; others (bad key, unknown or retired model) fail straight away.
+    struct Failure: LocalizedError {
+        let message: String
+        let isTemporary: Bool
+        var retryAfter: UInt64?  // seconds, from the server's Retry-After header
+        var errorDescription: String? { message }
+    }
+
+    /// Seconds to wait before retries 1, 2 and 3.
+    private static let backoff: [UInt64] = [2, 8, 30]
+    private static let temporaryStatuses: Set<Int> = [408, 425, 429, 500, 502, 503, 504, 529]
+    private static let temporaryNetworkErrors: Set<URLError.Code> = [.networkConnectionLost, .notConnectedToInternet]
+
     static func json(_ request: URLRequest, body: Data? = nil) async throws -> [String: Any] {
+        var attempt = 0
+        while true {
+            do {
+                return try await send(request, body: body)
+            } catch let failure as Failure where failure.isTemporary && attempt < backoff.count {
+                let wait = min(failure.retryAfter ?? backoff[attempt], 60)
+                attempt += 1
+                try await Task.sleep(nanoseconds: wait * 1_000_000_000)
+            }
+        }
+    }
+
+    private static func send(_ request: URLRequest, body: Data?) async throws -> [String: Any] {
         let (data, response): (Data, URLResponse)
-        if let body {
-            (data, response) = try await URLSession.shared.upload(for: request, from: body)
-        } else {
-            (data, response) = try await URLSession.shared.data(for: request)
+        do {
+            if let body {
+                (data, response) = try await URLSession.shared.upload(for: request, from: body)
+            } else {
+                (data, response) = try await URLSession.shared.data(for: request)
+            }
+        } catch let error as URLError where temporaryNetworkErrors.contains(error.code) {
+            throw Failure(message: error.localizedDescription, isTemporary: true)
         }
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        guard let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else {
+        let http = response as? HTTPURLResponse
+        guard let status = http?.statusCode, (200..<300).contains(status) else {
             // OpenAI-style APIs send {"error": {"message": …}}; Ollama sends {"error": "…"}.
             let detail = ((json["error"] as? [String: Any])?["message"] as? String)
                 ?? json["error"] as? String
                 ?? String(data: data, encoding: .utf8) ?? "unknown error"
-            throw AppError("API error: \(detail)")
+            throw Failure(message: "API error: \(detail)",
+                          isTemporary: temporaryStatuses.contains(http?.statusCode ?? 0),
+                          retryAfter: http?.value(forHTTPHeaderField: "Retry-After").flatMap(UInt64.init))
         }
         return json
     }
