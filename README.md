@@ -42,7 +42,7 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
   obvious mishearings from context and to write the notes in the meeting's language.
 - **Who said what:** meeting apps put a coloured border around the active speaker (Zoom green, Meet
   blue, Teams purple). About once a second the app finds that border inside the meeting window and
-  reads the name label with on-device OCR (Apple Vision), so the transcript says `Priya Sharma:` instead
+  reads the name label with on-device OCR (Apple Vision), so the transcript says `Sam Lee:` instead
   of `Others:`. Frames are never saved.
 - **Participant list:** every ~15 s all name labels in the meeting window are read too, and passed to
   the notes AI so names are spelled right even for people who never got highlighted.
@@ -83,9 +83,9 @@ Each meeting gets a folder in `~/Documents/MeetingNotes/<date time> · <title>/`
 ```text
 [00:04] Alex: Morning all. Quick one today, the release plan and the login bug.
 
-[00:11] Priya Sharma: So the fix is merged, but QA found one more edge case with expired sessions.
+[00:11] Sam Lee: So the fix is merged, but QA found one more edge case with expired sessions.
 
-[00:24] James Carter: Can we still ship on Thursday, or do we push to Monday?
+[00:24] Jordan Diaz: Can we still ship on Thursday, or do we push to Monday?
 
 [00:31] Not recognised: I think Thursday is fine if QA signs off by Wednesday evening.
 ```
@@ -101,7 +101,7 @@ Each meeting gets a folder in `~/Documents/MeetingNotes/<date time> · <title>/`
 - Keep the Thursday release date, conditional on QA sign-off.
 
 ## Action items
-- [ ] Fix the expired-session edge case (Priya Sharma, Wednesday)
+- [ ] Fix the expired-session edge case (Sam Lee, Wednesday)
 - [ ] QA sign-off on the release build (QA team, Wednesday evening)
 
 ## Open questions
@@ -109,10 +109,10 @@ Each meeting gets a folder in `~/Documents/MeetingNotes/<date time> · <title>/`
 
 ## Detailed notes
 ### Login bug
-Priya confirmed the fix is merged. QA reproduced one more case where an expired session ...
+Sam confirmed the fix is merged. QA reproduced one more case where an expired session ...
 
 ### Release plan
-James asked whether Thursday is still realistic ...
+Jordan asked whether Thursday is still realistic ...
 ```
 
 ## How it works
@@ -149,7 +149,7 @@ James asked whether Thursday is still realistic ...
 3. **Speaker detection** runs in parallel: about once a second the meeting window is checked for the
    app's active-speaker border colour, and the name in that tile is read with Apple's on-device OCR.
    Every ~15 s all name labels in the window are read as well, giving a participant list. This
-   produces a timeline like `00:31 Priya Sharma, 00:32 Priya Sharma, 00:40 James Carter`. Frames are
+   produces a timeline like `00:31 Sam Lee, 00:32 Sam Lee, 00:40 Jordan Diaz`. Frames are
    analysed in memory and thrown away.
 4. **Transcribe.** After you stop, each chunk goes through Whisper, which returns text with start
    and end times. Chunk offsets turn those into meeting times.
@@ -157,8 +157,8 @@ James asked whether Thursday is still realistic ...
    timeline says was highlighted during those seconds; if nobody was (window hidden, speaker view), the
    line is `Not recognised`. Lines are sorted by time and consecutive lines by the same person merged.
 6. **Write notes.** The transcript, the speaker list, the names seen on screen and a fixed instruction
-   prompt go to the AI provider you picked. Where the conversation makes it obvious ("Thanks, Priya"),
-   the AI may mark a `Not recognised` speaker as "likely Priya", but it is told not to guess otherwise. It returns the Summary, Decisions, Action items, Open questions and Detailed
+   prompt go to the AI provider you picked. Where the conversation makes it obvious ("Thanks, Sam"),
+   the AI may mark a `Not recognised` speaker as "likely Sam", but it is told not to guess otherwise. It returns the Summary, Decisions, Action items, Open questions and Detailed
    notes as Markdown.
 7. **Clean up.** `transcript.md` and `notes.md` are saved, the WAV files are deleted, and you get a
    notification. If any step fails the audio is kept so **Retry** can run steps 4–7 again.
@@ -372,7 +372,7 @@ The three main switches (auto-record, speakers, AI notes) are also in the menu-b
    - **Microphone** → Allow.
    - **Screen & System Audio Recording** → open System Settings → Privacy & Security → enable
      *MeetingNotes*. macOS may ask you to quit and reopen the app; do so and start again.
-3. While recording, the popover shows a timer and who is speaking, e.g. "Priya Sharma is speaking".
+3. While recording, the popover shows a timer and who is speaking, e.g. "Sam Lee is speaking".
    Minimise the meeting window (or switch away from the Meet tab) and it shows
    "Google Meet not visible – notes from audio only".
 4. Press **Stop & write notes**. When the notification arrives, click it (or **Open**) to read the notes.

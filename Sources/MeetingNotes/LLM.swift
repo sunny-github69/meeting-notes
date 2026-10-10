@@ -10,8 +10,8 @@ enum LLM {
     invent facts. Speaker names come from the meeting app's active-speaker highlight: usually right, \
     occasionally off by a line. "Not recognised" means the speaker could not be identified. "Names seen on \
     screen" is OCR of the meeting window and may include some UI text; use it to spell names correctly. Only \
-    when the conversation makes it clear who a "Not recognised" speaker is (e.g. "Thanks, Priya"), you may \
-    write "likely Priya"; otherwise do not guess. Use names for decisions and action-item owners when clear.
+    when the conversation makes it clear who a "Not recognised" speaker is (e.g. "Thanks, Sam"), you may \
+    write "likely Sam"; otherwise do not guess. Use names for decisions and action-item owners when clear.
 
     Write the notes in the main language of the transcript. Reply in Markdown. The first line is a short \
     title for the meeting (at most 6 words, no date), as "# Title". Then exactly these sections:
