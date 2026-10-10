@@ -21,7 +21,7 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
 
 | Menu bar | AI notes settings | Transcription settings |
 |---|---|---|
-| <img src="docs/menu.png" width="280" alt="Menu-bar popover with Start recording, quick switches and recent meetings"> | <img src="docs/settings-ai.png" width="300" alt="Settings, AI notes tab: provider, API key and model"> | <img src="docs/settings-transcription.png" width="300" alt="Settings, Transcription tab: local whisper.cpp with model found"> |
+| <img src="docs/menu.png" width="280" alt="Menu-bar popover writing notes step by step, with quick switches and recent meetings"> | <img src="docs/settings-ai.png" width="300" alt="Settings, AI notes tab: Gemini provider, key checked, model chosen"> | <img src="docs/settings-transcription.png" width="300" alt="Settings, Transcription tab: local whisper.cpp, language and model found"> |
 
 **Contents:** [Features](#features) · [Example output](#example-output) · [How it works](#how-it-works) ·
 [Why two AI models](#why-two-different-ai-models) · [Whisper & the model file](#transcription-whisper-ggml-and-large-v3-turbo-q5_0) ·
