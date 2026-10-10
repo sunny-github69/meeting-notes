@@ -343,9 +343,25 @@ cp -R build/MeetingNotes.app /Applications/
 open /Applications/MeetingNotes.app
 ```
 
-The app is ad-hoc signed, so macOS treats each build as a new app: if recording fails after an update,
-remove *MeetingNotes* from Privacy & Security → Screen & System Audio Recording and Microphone, and
-allow it again. Settings and API keys are kept.
+#### Keep permissions across rebuilds (recommended)
+
+By default the app is ad-hoc signed, and macOS treats every rebuild as a new app, so it asks for
+Screen & System Audio Recording again even though *MeetingNotes* is already switched on. Fix it once
+with a free, local signing certificate:
+
+1. Open **Keychain Access** → menu **Keychain Access → Certificate Assistant → Create a Certificate…**
+2. Name: `MeetingNotes Local`, Identity Type: **Self Signed Root**, Certificate Type: **Code Signing**
+   → **Create**.
+3. Clear the old permission once, rebuild and allow it again:
+   ```bash
+   tccutil reset ScreenCapture com.local.meetingnotes
+   tccutil reset Microphone com.local.meetingnotes
+   ./scripts/build_app.sh        # prints: Signed with "MeetingNotes Local"
+   ```
+
+From now on rebuilds keep the permission. (If you skip this: after each update, remove *MeetingNotes*
+from Privacy & Security → Screen & System Audio Recording with **−**, then allow it again.) Settings
+and API keys are kept either way.
 
 ### Troubleshooting
 
@@ -359,6 +375,7 @@ allow it again. Settings and API keys are kept.
 | Notes have no "Others" lines | Screen & System Audio Recording permission is missing; grant it and reopen the app. |
 | Every line is "Not recognised" | Use the grid/gallery view and keep the meeting window visible (Meet: keep its tab in front). For Meet/Teams the highlight colour may need tuning in `MeetingApp.isHighlight`. |
 | Auto-record doesn't start for Meet/Teams | Needs macOS 14.4+. For Meet, the tab title must start with "Meet". Otherwise press Start manually. |
+| Asks for Screen Recording again although it's already on | The rebuild changed the app's signature. See [Keep permissions across rebuilds](#keep-permissions-across-rebuilds-recommended). |
 | "Couldn't change login item" | Move the app to `/Applications` first. |
 | API error | Check the key and the account's credit in the provider's console. |
 | "Can't reach Ollama" | Open the Ollama app (or run `ollama serve`), then press ↻ next to Model. |
