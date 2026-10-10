@@ -132,7 +132,9 @@ enum HTTP {
         }
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else {
+            // OpenAI-style APIs send {"error": {"message": …}}; Ollama sends {"error": "…"}.
             let detail = ((json["error"] as? [String: Any])?["message"] as? String)
+                ?? json["error"] as? String
                 ?? String(data: data, encoding: .utf8) ?? "unknown error"
             throw AppError("API error: \(detail)")
         }

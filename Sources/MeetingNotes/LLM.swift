@@ -82,9 +82,11 @@ enum LLM {
             return (json["data"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
         case .ollama:
             let json = try await reachOllama { try await HTTP.json(URLRequest(url: URL(string: "\(ollamaBase)/tags")!)) }
+            // Skip "cloud" models: Ollama runs those on its servers, which breaks the local, offline promise.
             return (json["models"] as? [[String: Any]] ?? [])
+                .filter { $0["remote_host"] == nil }
                 .compactMap { $0["name"] as? String }
-                .filter { !$0.contains("embed") }
+                .filter { !$0.contains("embed") && !$0.contains("cloud") }
         case .openai, .gemini, .mistral:
             let json = try await HTTP.json(openAIRequest(provider.openAICompatibleBase!, "models", key: key))
             return (json["data"] as? [[String: Any]] ?? [])

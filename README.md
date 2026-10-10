@@ -379,6 +379,7 @@ and API keys are kept either way.
 | "Couldn't change login item" | Move the app to `/Applications` first. |
 | API error | Check the key and the account's credit in the provider's console. |
 | "Can't reach Ollama" | Open the Ollama app (or run `ollama serve`), then press ↻ next to Model. |
+| Ollama: "… was retired" or the model needs a sign-in | It was an Ollama *cloud* model. The app now lists only local models; pick one (e.g. `llama3.1`) and press **Retry**. |
 | Ollama: "No models installed" | `ollama pull llama3.1` (or any chat model), then press ↻. |
 
 ### Uninstall
