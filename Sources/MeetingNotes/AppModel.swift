@@ -6,16 +6,26 @@ final class AppModel: ObservableObject {
     enum State: Equatable {
         case idle
         case recording(Date)
-        case processing(String)
-        case done(URL)
+        case processing(Step)
+        case done(Meeting)
         case failed(String)
     }
 
-    struct Meeting: Identifiable {
-        let id: URL
+    enum Step: Equatable {
+        case transcribing
+        case writingNotes(model: String)
+    }
+
+    /// A saved meeting: a folder named "yyyy-MM-dd HHmm" or "yyyy-MM-dd HHmm · Title".
+    struct Meeting: Identifiable, Equatable {
+        let id: URL  // the folder
         let date: Date
-        let file: URL
+        let title: String?
+        let file: URL  // notes.md, else transcript.md
         let hasNotes: Bool
+        let summary: [String]  // first bullets of the Summary section
+
+        var displayTitle: String { title ?? date.formatted(date: .abbreviated, time: .shortened) }
     }
 
     @Published private(set) var state: State = .idle
@@ -32,6 +42,7 @@ final class AppModel: ObservableObject {
     private var ignoreCurrentMeeting = false
     private var missedPolls = 0
 
+    private static let titleSeparator = " · "
     private static let folderFormat: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HHmm"
@@ -100,35 +111,39 @@ final class AppModel: ObservableObject {
     private func process() async {
         guard let session, let recording = session.recording else { return }
         do {
-            state = .processing("Transcribing…")
+            state = .processing(.transcribing)
             let segments = try await Transcriber.transcribe(tracks: recording.tracks, engine: Prefs.sttEngine,
                                                               language: Prefs.transcriptionLanguage)
                 .map { name($0, using: recording.speakers) }
             guard !segments.isEmpty else { throw AppError("No speech was detected.") }
             let transcript = Transcriber.format(segments)
-            var result = session.dir.appendingPathComponent("transcript.md")
-            try transcript.write(to: result, atomically: true, encoding: .utf8)
+            try transcript.write(to: session.dir.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
+            var title: String?
 
             if Prefs.aiNotesEnabled {
                 let provider = Prefs.provider
                 let model = Prefs.model(for: provider)
-                state = .processing("Writing notes with \(model)…")
+                state = .processing(.writingNotes(model: model))
                 var seen = Set<String>()
                 let speakers = segments.map(\.speaker).filter { seen.insert($0).inserted }
                 let notes = try await LLM.complete(
                     provider: provider, model: model,
                     user: LLM.userMessage(transcript: transcript, app: recording.app, recordedBy: Prefs.yourName,
                                           speakers: speakers, namesOnScreen: recording.participants))
-                result = session.dir.appendingPathComponent("notes.md")
-                try notes.write(to: result, atomically: true, encoding: .utf8)
+                try notes.write(to: session.dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
+                title = LLM.title(fromNotes: notes)
             }
 
             // Raw audio is only kept when something failed, so it can be retried.
             recording.tracks.flatMap(\.chunks).forEach { try? FileManager.default.removeItem(at: $0.url) }
             self.session = nil
-            state = .done(result)
+            // Saved already under the date; the AI's title is applied on top and can be changed later.
+            let saved = Self.meeting(at: session.dir)
+            let meeting = title.flatMap { title in saved.flatMap { try? move($0, to: title) } } ?? saved
+            guard let meeting else { throw AppError("Couldn't read the saved meeting.") }
+            state = .done(meeting)
             refreshRecent()
-            Notifier.shared.post("Meeting notes ready", "Click to open \(result.lastPathComponent).", open: result)
+            Notifier.shared.post("Meeting notes ready", "\(meeting.displayTitle): click to open.", open: meeting.file)
         } catch {
             state = .failed("\(error.localizedDescription) Audio kept in \(session.dir.lastPathComponent).")
             Notifier.shared.post("Meeting notes failed", error.localizedDescription)
@@ -173,19 +188,68 @@ final class AppModel: ObservableObject {
     // MARK: Menu & settings helpers
 
     func refreshRecent() {
+        let dirs = (try? FileManager.default.contentsOfDirectory(
+            at: Self.notesRoot, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
+        recent = dirs.compactMap(Self.meeting(at:)).sorted { $0.date > $1.date }.prefix(5).map { $0 }
+    }
+
+    /// Renames a saved meeting. An empty title goes back to the plain date name.
+    func rename(_ meeting: Meeting, to title: String) {
+        guard let renamed = try? move(meeting, to: title) else { return }
+        if case .done(let current) = state, current.id == meeting.id { state = .done(renamed) }
+        refreshRecent()
+    }
+
+    func moveToTrash(_ meeting: Meeting) {
+        try? FileManager.default.trashItem(at: meeting.id, resultingItemURL: nil)
+        if case .done(let current) = state, current.id == meeting.id { state = .idle }
+        refreshRecent()
+    }
+
+    func copyNotes(_ meeting: Meeting) {
+        guard let text = try? String(contentsOf: meeting.file, encoding: .utf8) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func move(_ meeting: Meeting, to title: String) throws -> Meeting? {
+        // Finder-safe: no slashes or colons, single line, sensible length.
+        let clean = title.components(separatedBy: CharacterSet(charactersIn: "/:\n\r")).joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        let name = Self.folderFormat.string(from: meeting.date)
+            + (clean.isEmpty ? "" : Self.titleSeparator + String(clean.prefix(80)))
+        let target = meeting.id.deletingLastPathComponent().appendingPathComponent(name)
+        if target.path != meeting.id.path {
+            try FileManager.default.moveItem(at: meeting.id, to: target)
+        }
+        return Self.meeting(at: target)
+    }
+
+    private static func meeting(at dir: URL) -> Meeting? {
+        let name = dir.lastPathComponent
+        guard let date = folderFormat.date(from: String(name.prefix(15))) else { return nil }
+        let title = name.count > 15
+            ? String(name.dropFirst(15)).replacingOccurrences(of: titleSeparator, with: "", options: .anchored)
+            : nil
         let fm = FileManager.default
-        let dirs = (try? fm.contentsOfDirectory(at: Self.notesRoot, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
-        recent = dirs
-            .compactMap { dir -> Meeting? in
-                guard let date = Self.folderFormat.date(from: dir.lastPathComponent) else { return nil }
-                let notes = dir.appendingPathComponent("notes.md")
-                let transcript = dir.appendingPathComponent("transcript.md")
-                let file = [notes, transcript].first { fm.fileExists(atPath: $0.path) } ?? dir
-                return Meeting(id: dir, date: date, file: file, hasNotes: file == notes)
-            }
-            .sorted { $0.date > $1.date }
-            .prefix(5)
-            .map { $0 }
+        let notes = dir.appendingPathComponent("notes.md")
+        let transcript = dir.appendingPathComponent("transcript.md")
+        guard let file = [notes, transcript].first(where: { fm.fileExists(atPath: $0.path) }) else { return nil }
+        let summary = file == notes ? summaryBullets(of: notes) : []
+        return Meeting(id: dir, date: date, title: title?.isEmpty == false ? title : nil,
+                       file: file, hasNotes: file == notes, summary: summary)
+    }
+
+    /// The first bullets under "## Summary" in notes.md, for a preview in the menu.
+    private static func summaryBullets(of notes: URL, limit: Int = 3) -> [String] {
+        guard let text = try? String(contentsOf: notes, encoding: .utf8) else { return [] }
+        let lines = text.components(separatedBy: .newlines)
+        guard let start = lines.firstIndex(where: { $0.hasPrefix("## Summary") }) else { return [] }
+        return lines[(start + 1)...]
+            .prefix { !$0.hasPrefix("## ") }
+            .filter { $0.hasPrefix("- ") || $0.hasPrefix("* ") }
+            .prefix(limit)
+            .map { String($0.dropFirst(2)) }
     }
 
     func refreshModels(for provider: Provider) async {

@@ -13,7 +13,8 @@ enum LLM {
     when the conversation makes it clear who a "Not recognised" speaker is (e.g. "Thanks, Priya"), you may \
     write "likely Priya"; otherwise do not guess. Use names for decisions and action-item owners when clear.
 
-    Write the notes in the main language of the transcript. Reply in Markdown with exactly these sections:
+    Write the notes in the main language of the transcript. Reply in Markdown. The first line is a short \
+    title for the meeting (at most 6 words, no date), as "# Title". Then exactly these sections:
     ## Summary
     5-8 bullets, readable in 30 seconds.
     ## Decisions
@@ -26,6 +27,14 @@ enum LLM {
     Long-form notes grouped by topic with ### sub-headings, in the order discussed. Keep the numbers, names, \
     reasons and trade-offs that were mentioned.
     """
+
+    /// The "# Title" first line of the notes, if the model wrote one.
+    static func title(fromNotes notes: String) -> String? {
+        guard let first = notes.split(separator: "\n", omittingEmptySubsequences: true).first,
+              first.hasPrefix("# ") else { return nil }
+        let title = first.dropFirst(2).trimmingCharacters(in: .whitespaces)
+        return title.isEmpty ? nil : String(title.prefix(80))
+    }
 
     static func userMessage(transcript: String, app: MeetingApp?, recordedBy: String, speakers: [String],
                             namesOnScreen: [String]) -> String {

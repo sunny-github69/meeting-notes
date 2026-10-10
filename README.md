@@ -47,12 +47,16 @@ read from the screen. The colours live in `MeetingApp.isHighlight` and are easy 
   or **Ollama** for a fully local, free and offline pipeline (no API key). The model list is fetched live from the
   provider, so new models appear without an app update. Keys are kept in the macOS Keychain.
 - **Free transcription:** offline `whisper.cpp`, or the OpenAI Whisper API if you prefer.
+- **Named and organised:** the notes AI suggests a short title, and the meeting is saved as
+  `2026-10-10 1111 · Sprint planning`. After saving you can rename it right in the menu (✓ to save,
+  ✕/Esc to keep the saved name), and every recent meeting can be renamed, copied, shown in Finder or
+  moved to the Trash (hover or right-click).
 - **Hands-free:** optional auto-record when a Zoom, Meet or Teams call starts (and stop when it ends),
   launch at login, and a macOS notification when the notes are ready.
 
 ## Example output
 
-Each meeting gets a folder in `~/Documents/MeetingNotes/<date time>/`. The example below is fictional.
+Each meeting gets a folder in `~/Documents/MeetingNotes/<date time> · <title>/`. The example below is fictional.
 
 `transcript.md`
 
@@ -229,7 +233,8 @@ mac-app/
     ├── scripts/build_app.sh     Builds a release binary, wraps it into MeetingNotes.app, signs it ad hoc
     ├── docs/                    Screenshots used in this README
     └── Sources/MeetingNotes/
-        ├── MeetingNotesApp.swift   UI: menu-bar popover and the Settings window (General, AI notes, Transcription)
+        ├── MeetingNotesApp.swift   App entry point and the Settings window (General, AI notes, Transcription)
+        ├── MenuView.swift          Menu-bar popover: recording card, progress steps, rename/preview card, recent list
         ├── MeetingApp.swift        Zoom / Meet / Teams: bundle ids, highlight colours, call detection
         │                           (mic usage per app, window titles)
         ├── AppModel.swift          State (idle → recording → processing → done/failed), auto-record,
@@ -329,7 +334,10 @@ To test speaker names, join the same meeting from a phone and talk from there.
 - **Manual:** menu-bar icon → **Start recording** → **Stop & write notes**.
 - **Automatic:** turn on **Auto-record meetings**. Recording starts when you join a meeting and
   the notes are written when you leave. Pressing Stop mid-meeting stops it for that meeting.
-- Past meetings are listed under **Recent** in the popover; **Open notes folder** shows all of them.
+- When notes are ready the menu shows the name, a short summary preview and **Open / Copy / Finder**
+  buttons. Type a new name and press Return (or ✓) to rename; Esc or ✕ keeps the saved name.
+- The last five meetings are listed under **Recent**: click to open, hover for ✏️ rename and 🗑 trash,
+  right-click for more. **All notes** opens the folder with every meeting.
 
 ### Updating
 
