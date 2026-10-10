@@ -272,31 +272,29 @@ to install, but the audio is uploaded and billed per minute, and it needs an Ope
 ## Project structure
 
 ```text
-mac-app/
-├── LICENSE                      MIT
-├── README.md                    List of apps in this repo
-└── meeting-notes/
-    ├── Package.swift            Swift Package: macOS 13+, no third-party dependencies
-    ├── Resources/Info.plist     Bundle id, menu-bar-only app (no Dock icon), microphone prompt text
-    ├── scripts/build_app.sh     Builds a release binary, wraps it into MeetingNotes.app, signs it ad hoc
-    ├── Resources/AppIcon.icns   App icon (regenerate with scripts/make_icon.py, needs Pillow)
-    ├── docs/                    Screenshots and the icon used in this README
-    └── Sources/MeetingNotes/
-        ├── MeetingNotesApp.swift   App entry point and the Settings window (General, AI notes, Transcription)
-        ├── MenuView.swift          Menu-bar popover: recording card, queue with progress ring, notes card, recent list
-        ├── MeetingApp.swift        Zoom / Meet / Teams: bundle ids, highlight colours, call detection
-        │                           (mic usage per app, window titles)
-        ├── AppModel.swift          Recording, the processing queue (progress, retry, resume), auto-record,
-        │                           runs the pipeline, recent meetings
-        ├── Recorder.swift          ScreenCaptureKit (meeting audio + frames), microphone, 16 kHz WAV chunk writer
-        ├── SpeakerDetector.swift   Highlight detection, Vision OCR, window-visible check, speaker timeline,
-        │                           participant names
-        ├── Transcriber.swift       whisper.cpp / Whisper API calls, timestamps, transcript formatting
-        ├── NotesWriter.swift       Single pass or map-reduce for long meetings, fallback model, eased progress
-        ├── LLM.swift               Notes prompts; Anthropic API, OpenAI-compatible API (OpenAI, Gemini,
-        │                           Mistral) and Ollama's local API; live model lists
-        ├── Support.swift           Providers, preferences, Keychain, HTTP helper
-        └── System.swift            Launch at login, macOS notifications
+meeting-notes/
+├── LICENSE                  MIT
+├── Package.swift            Swift Package: macOS 13+, no third-party dependencies
+├── Resources/Info.plist     Bundle id, menu-bar-only app (no Dock icon), microphone prompt text
+├── Resources/AppIcon.icns   App icon (regenerate with scripts/make_icon.py, needs Pillow)
+├── scripts/build_app.sh     Builds a release binary, wraps it into MeetingNotes.app, signs it
+├── docs/                    Screenshots and the icon used in this README
+└── Sources/MeetingNotes/
+    ├── MeetingNotesApp.swift   App entry point and the Settings window (General, AI notes, Transcription)
+    ├── MenuView.swift          Menu-bar popover: recording card, queue with progress ring, notes card, recent list
+    ├── MeetingApp.swift        Zoom / Meet / Teams: bundle ids, highlight colours, call detection
+    │                           (mic usage per app, window titles)
+    ├── AppModel.swift          Recording, the processing queue (progress, retry, resume), auto-record,
+    │                           runs the pipeline, recent meetings
+    ├── Recorder.swift          ScreenCaptureKit (meeting audio + frames), microphone, 16 kHz WAV chunk writer
+    ├── SpeakerDetector.swift   Highlight detection, Vision OCR, window-visible check, speaker timeline,
+    │                           participant names
+    ├── Transcriber.swift       whisper.cpp / Whisper API calls, timestamps, transcript formatting
+    ├── NotesWriter.swift       Single pass or map-reduce for long meetings, fallback model, eased progress
+    ├── LLM.swift               Notes prompts; Anthropic API, OpenAI-compatible API (OpenAI, Gemini,
+    │                           Mistral) and Ollama's local API; live model lists
+    ├── Support.swift           Providers, preferences, Keychain, HTTP helper
+    └── System.swift            Launch at login, macOS notifications
 ```
 
 Built with Apple frameworks only: SwiftUI, ScreenCaptureKit, AVFoundation, Vision, ServiceManagement,
@@ -333,8 +331,8 @@ Skip steps 1–2 for whisper if you will use the **OpenAI Whisper API** for tran
 ### 3. Get the code and build the app
 
 ```bash
-git clone https://github.com/sunny-github69/mac-app.git
-cd mac-app/meeting-notes
+git clone https://github.com/sunny-github69/meeting-notes.git
+cd meeting-notes
 ./scripts/build_app.sh                      # creates build/MeetingNotes.app
 cp -R build/MeetingNotes.app /Applications/ # needed for "Launch at login"
 open /Applications/MeetingNotes.app
@@ -396,7 +394,7 @@ To test speaker names, join the same meeting from a phone and talk from there.
 ### Updating
 
 ```bash
-cd mac-app/meeting-notes
+cd meeting-notes
 git pull
 pkill -x MeetingNotes                       # quit the running copy (ignore "no process found")
 ./scripts/build_app.sh
@@ -479,4 +477,4 @@ a meeting without telling people.
 
 ## License
 
-[MIT](../LICENSE)
+[MIT](LICENSE)
