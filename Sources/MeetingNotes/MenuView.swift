@@ -235,7 +235,8 @@ struct DoneCard: View {
                 if let notesModel = meeting.notesModel {
                     Text("·")
                     Image(systemName: "sparkles")
-                    Text(notesModel).lineLimit(1)
+                    // "gemini-3.8-flash (Gemini (Google))" → just the model, so the line fits.
+                    Text(notesModel.components(separatedBy: " (").first ?? notesModel).lineLimit(1)
                 }
             }
             .font(.caption)
