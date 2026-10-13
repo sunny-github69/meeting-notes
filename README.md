@@ -278,6 +278,7 @@ meeting-notes/
 ├── Resources/Info.plist     Bundle id, menu-bar-only app (no Dock icon), microphone prompt text
 ├── Resources/AppIcon.icns   App icon (regenerate with scripts/make_icon.py, needs Pillow)
 ├── scripts/build_app.sh     Builds a release binary, wraps it into MeetingNotes.app, signs it
+├── scripts/reinstall.sh     Quit, reset permissions, rebuild, install to /Applications and open
 ├── docs/                    Screenshots and the icon used in this README
 └── Sources/MeetingNotes/
     ├── MeetingNotesApp.swift   App entry point and the Settings window (General, AI notes, Transcription)
@@ -435,7 +436,7 @@ and API keys are kept either way.
 | Notes have no "Others" lines | Screen & System Audio Recording permission is missing; grant it and reopen the app. |
 | Every line is "Not recognised" | Use the grid/gallery view and keep the meeting window visible (Meet: keep its tab in front). For Meet/Teams the highlight colour may need tuning in `MeetingApp.isHighlight`. |
 | Auto-record doesn't start for Meet/Teams | Needs macOS 14.4+. For Meet, the tab title must start with "Meet". Otherwise press Start manually. |
-| Asks for Screen Recording again although it's already on | The rebuild changed the app's signature. See [Keep permissions across rebuilds](#keep-permissions-across-rebuilds-recommended). |
+| Asks for Screen Recording again although it's already on | Run `./scripts/reinstall.sh` (quits, resets the permissions, rebuilds, reinstalls, opens), then allow once. To stop it for good, see [Keep permissions across rebuilds](#keep-permissions-across-rebuilds-recommended). |
 | "Couldn't change login item" | Move the app to `/Applications` first. |
 | API error | Check the key and the account's credit in the provider's console. |
 | "Can't reach Ollama" | Open the Ollama app (or run `ollama serve`), then press ↻ next to Model. |
